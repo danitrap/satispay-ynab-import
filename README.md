@@ -192,3 +192,16 @@ Il successo di questo test non garantisce il matching di tutti i movimenti futur
 ### Evoluzione del mapping — 18 ottobre 2026
 
 L'esame dell'export storico Satispay (302 righe) ha mostrato ricariche bancarie, trasferimenti P2P, pagamenti con carta, movimenti verso salvadanai/investimenti e righe `Altro`. Su richiesta dell'utente il Worker è stato semplificato: **tutti i movimenti di Disponibilità con segno negativo diventano uscite, quelli positivi entrate; nessuna classificazione a transfer**. L'approvazione, la riclassificazione delle ricariche/trasferimenti e la riconciliazione restano manuali in YNAB. Gli `import_id` non sono stati modificati.
+
+## Effect v4 architecture (proposed migration)
+
+This branch uses the stable `effect@^4.0.2` runtime for side effects and orchestration, while keeping accounting calculations pure and deterministic.
+
+- **HTTP adapter** (`src/index.ts`): one `Effect.runPromise` at the Cloudflare Worker request boundary. Upload streaming, multipart parsing, CSV parsing and route handling are composable effects with typed failures.
+- **Workbook service** (`src/spreadsheet.ts`): `readSheetEffect` captures dynamic XLSX decoding failures without leaking data.
+- **Import pipeline** (`src/import-handler.ts`): `readSheetEffect → buildImportPlan → sendToYnabEffect`, or dry-run without writes. Business failures preserve the current JSON response shapes and HTTP status codes.
+- **YNAB client** (`src/ynab.ts`): typed `YnabError` failures for HTTP/network/decoding/guardrails and effectful SHA-256 import IDs. `fetchFn` stays injectable for tests. Promise-compatible exports remain for the existing tests.
+- **Pure domain** (`src/csv.ts`, `src/preview.ts`, `src/import-plan.ts`, `src/ledger.ts`): no Effect wrappers around basic math. Their deterministic computation is integrated into Effect via the calling pipeline.
+- The import ID prefix `SPS:`, SHA-256 input namespace and truncation, date cutoff, benefit allocation, mixed-refund logic, and all YNAB account safety guards are unchanged.
+
+Run `npm test`, `npm run check`, and `npm run check:bundle` before considering merging; the last command produces a local dry-run bundle, **not a Cloudflare deployment**. The live Worker remains on `main` until this PR is merged. Existing Cloudflare Secrets and Wrangler vars are unchanged.
