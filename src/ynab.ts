@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type { ImportCandidate, ImportPlan } from "./import-plan.ts";
 
 export type YnabEnv = {
@@ -9,7 +9,23 @@ export type YnabEnv = {
   YNAB_WRITE_ENABLED?: string;
 };
 type ApiFetch = typeof fetch;
-type Account = { id: string; name: string; on_budget: boolean; closed: boolean; deleted?: boolean };
+// Every response from YNAB is untrusted: decode the minimal API contract.
+const AccountSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  on_budget: Schema.Boolean,
+  closed: Schema.Boolean,
+  deleted: Schema.optionalKey(Schema.Boolean)
+});
+const PlansSchema = Schema.Struct({
+  plans: Schema.Array(Schema.Struct({id: Schema.String, name: Schema.String}))
+});
+const AccountsSchema = Schema.Struct({accounts: Schema.Array(AccountSchema)});
+const AccountResponseSchema = Schema.Struct({account: AccountSchema});
+const ImportResultSchema = Schema.Struct({
+  transaction_ids: Schema.Array(Schema.String),
+  duplicate_import_ids: Schema.Array(Schema.String)
+});
 
 export class YnabError extends Error {
   readonly _tag = "YnabError";
@@ -45,19 +61,24 @@ function apiEffect(path:string, token:string, method="GET", body?:unknown, fetch
     if (!parsed || typeof parsed !== "object" || !("data" in parsed) || !parsed.data) {
       return yield* Effect.fail(new YnabError("YNAB returned unexpected JSON. Check import status before repeating."));
     }
-    return parsed.data as any;
+    return parsed.data as unknown;
   });
 }
 
 export function findSatispayAccountsEffect(env:YnabEnv, fetchFn:ApiFetch=fetch) {
   return Effect.gen(function* () {
     const token=yield* requireToken(env);
-    const plans=(yield* apiEffect("/plans",token,"GET",undefined,fetchFn)).plans as {id:string;name:string}[];
-    if(!Array.isArray(plans)) return yield* Effect.fail(new YnabError("Cannot list YNAB plans"));
+    const rawPlans=yield* apiEffect("/plans",token,"GET",undefined,fetchFn);
+    const {plans}=yield* Schema.decodeUnknownEffect(PlansSchema)(rawPlans).pipe(
+      Effect.mapError(()=>new YnabError("Cannot list YNAB plans"))
+    );
     const matches:{planId:string;planName:string;accountId:string;accountName:string;onBudget:boolean}[]=[];
     for(const plan of plans.slice(0,20)) {
-      const accounts=(yield* apiEffect("/plans/"+encodeURIComponent(plan.id)+"/accounts",token,"GET",undefined,fetchFn)).accounts as Account[];
-      for(const account of accounts??[]) {
+      const rawAccounts=yield* apiEffect("/plans/"+encodeURIComponent(plan.id)+"/accounts",token,"GET",undefined,fetchFn);
+      const {accounts}=yield* Schema.decodeUnknownEffect(AccountsSchema)(rawAccounts).pipe(
+        Effect.mapError(()=>new YnabError("Cannot list YNAB accounts"))
+      );
+      for(const account of accounts) {
         if(account.name.toLowerCase().includes("satispay") && !account.closed && !account.deleted) {
           matches.push({planId:plan.id,planName:plan.name,accountId:account.id,accountName:account.name,onBudget:account.on_budget});
         }
@@ -76,8 +97,10 @@ export function validateTargetAccountEffect(env:YnabEnv, fetchFn:ApiFetch=fetch)
     if(!env.YNAB_PLAN_ID || !env.YNAB_ACCOUNT_ID) {
       return yield* Effect.fail(new YnabError("Set YNAB_PLAN_ID and YNAB_ACCOUNT_ID"));
     }
-    const data=yield* apiEffect("/plans/"+encodeURIComponent(env.YNAB_PLAN_ID)+"/accounts/"+encodeURIComponent(env.YNAB_ACCOUNT_ID),token,"GET",undefined,fetchFn);
-    const account=data.account as Account | undefined;
+    const rawAccount=yield* apiEffect("/plans/"+encodeURIComponent(env.YNAB_PLAN_ID)+"/accounts/"+encodeURIComponent(env.YNAB_ACCOUNT_ID),token,"GET",undefined,fetchFn);
+    const {account}=yield* Schema.decodeUnknownEffect(AccountResponseSchema)(rawAccount).pipe(
+      Effect.mapError(()=>new YnabError("Target must be an active on-budget account named Satispay"))
+    );
     if(!account || account.id!==env.YNAB_ACCOUNT_ID || !account.name.toLowerCase().includes("satispay") || !account.on_budget || account.closed || account.deleted) {
       return yield* Effect.fail(new YnabError("Target must be an active on-budget account named Satispay"));
     }
@@ -97,7 +120,7 @@ export function importIdEffect(satispayId:string) {
 export const importId = (satispayId:string) => Effect.runPromise(importIdEffect(satispayId));
 
 export function buildYnabTransactionsEffect(candidates:ImportCandidate[],accountId:string) {
-  return Effect.all(candidates.map(row=>Effect.map(importIdEffect(row.satispayId),import_id=>({
+  return Effect.forEach(candidates, row=>Effect.map(importIdEffect(row.satispayId),import_id=>({
     account_id:accountId,
     date:row.date,
     amount:row.amountMilliunits,
@@ -106,7 +129,7 @@ export function buildYnabTransactionsEffect(candidates:ImportCandidate[],account
     cleared:"cleared" as const,
     approved:false,
     import_id
-  }))));
+  })), {concurrency: 4});
 }
 export const buildYnabTransactions=(candidates:ImportCandidate[],accountId:string)=>
   Effect.runPromise(buildYnabTransactionsEffect(candidates,accountId));
@@ -120,10 +143,10 @@ export function sendToYnabEffect(plan:ImportPlan,env:YnabEnv,fetchFn:ApiFetch=fe
     if(!plan.candidates.length) return {submitted:0,processed:0,duplicateImports:0,ynabReportedTransactionIds:0};
     const transactions=yield* buildYnabTransactionsEffect(plan.candidates,env.YNAB_ACCOUNT_ID!);
     const token=yield* requireToken(env);
-    const data=yield* apiEffect("/plans/"+encodeURIComponent(env.YNAB_PLAN_ID!)+"/transactions",token,"POST",{transactions},fetchFn);
-    if(!Array.isArray(data.transaction_ids) || !Array.isArray(data.duplicate_import_ids)) {
-      return yield* Effect.fail(new YnabError("Unexpected YNAB response: verify results in YNAB before retrying"));
-    }
+    const rawResult=yield* apiEffect("/plans/"+encodeURIComponent(env.YNAB_PLAN_ID!)+"/transactions",token,"POST",{transactions},fetchFn);
+    const data=yield* Schema.decodeUnknownEffect(ImportResultSchema)(rawResult).pipe(
+      Effect.mapError(()=>new YnabError("Unexpected YNAB response: verify results in YNAB before retrying"))
+    );
     const submitted=transactions.length;
     const duplicateImports=data.duplicate_import_ids.length;
     if(duplicateImports>submitted) return yield* Effect.fail(new YnabError("Unexpected YNAB duplicate import count"));

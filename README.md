@@ -211,3 +211,11 @@ The PR branch includes an isolated `[previews.vars]` section, required when the 
 You can smoke-test the unauthenticated `GET /health` route on the resulting Preview URL. Testing authenticated endpoints requires a separate Preview-specific `UPLOAD_TOKEN` secret; YNAB account discovery and live importing are intentionally **not supported** in this safe Preview configuration.
 
 Run `npm test`, `npm run check`, and `npm run check:bundle` before considering merging; the last command produces a local dry-run bundle, **not a Cloudflare deployment**. The live Worker remains on `main` until this PR is merged. Existing Cloudflare Secrets and Wrangler vars are unchanged.
+
+### Additional Effect v4 adoption
+
+- The YNAB HTTP boundary now uses `Schema.decodeUnknownEffect` for plan/account/import responses instead of unchecked `any` casts. Malformed HTTP 200 replies fail with a typed `YnabError`; the importer **does not retry POST** on ambiguous responses.
+- SHA-256 import IDs are constructed with `Effect.forEach({ concurrency: 4 })`, retaining deterministic input ordering and the original `SPS:` namespace.
+- Effect-focused regression tests exercise malformed API JSON, account safety, matched transactions and hashing order using injected `fetch` implementations (no real YNAB calls).
+- Effect v4 schemas require TypeScript 5.9+, now reflected in `package.json`.
+- Pure Satispay ledger calculations, inclusion rules and mixed-refund logic stay untouched.
