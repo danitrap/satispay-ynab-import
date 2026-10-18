@@ -12,9 +12,9 @@ test('only moves in Disponibilità and no benefits spending',()=>{
     [day,'Pension','pension',-100,'al Fondo Pensioni','✅ Approvato',null,null,-100,null,'d']
   ]);
   assert.deepEqual([p.eligible,p.skipped,p.requiresReview],[2,2,0]);
-  assert.equal(p.outflowEur,5);
-  assert.equal(p.inflowEur,3);
-  assert.equal(p.netEur,-2);
+  assert.equal(p.outflowEur,'5.00');
+  assert.equal(p.inflowEur,'3.00');
+  assert.equal(p.netEur,'-2.00');
   assert.equal(JSON.stringify(p).includes('Shop'),false);
   assert.equal(JSON.stringify(p).includes('"a"'),false);
 });
@@ -31,4 +31,18 @@ test('identical IDs and bad statuses are blocked, zero values skipped',()=>{
  ]);
  assert.equal(p.eligible,0);assert.equal(p.requiresReview,3);assert.equal(p.skipped,1);
  assert.equal(p.byReason.missing_or_duplicate_id,2);
+});
+
+test('formatted amounts are stable and milliunits stay exact',()=>{
+ const p=previewSatispay([hdr,
+   [day,'a','',-70.12,'🏬 a un Negozio','✅ Approvato',-70.12,null,null,22,'a'],
+   [day,'b','',-20.11,'🏬 a un Negozio','✅ Approvato',-20.11,null,null,2,'b'],
+   [day,'c','',18.20,'🎖️ Punti','✅ Approvato',18.20,null,null,20,'c']
+ ]);
+ assert.equal(p.outflowEur,'90.23');
+ assert.equal(p.inflowEur,'18.20');
+ assert.equal(p.netEur,'-72.03');
+ assert.equal(p.outflowMilliunits,90230);
+ assert.equal(p.inflowMilliunits,18200);
+ assert.equal(p.netMilliunits,-72030);
 });

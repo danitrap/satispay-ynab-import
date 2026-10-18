@@ -78,7 +78,12 @@ export function previewSatispay(rows: Cell[][]) {
     }
   }
   const count=(decision:PreviewRow["decision"])=>all.filter(x=>x.decision===decision).length;
-  const money=(cents:number)=>Math.round(cents)/100;
+  // Keep arithmetic in integer cents and serialize display amounts as strings.
+  // This prevents Apple Shortcuts from showing binary floating-point artifacts.
+  const money=(cents:number):string=>{
+    const abs=Math.abs(cents);
+    return `${cents < 0 ? "-" : ""}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2,"0")}`;
+  };
   return {
     mode:"preview-only",
     rowCount:all.length,
@@ -88,6 +93,9 @@ export function previewSatispay(rows: Cell[][]) {
     outflowEur:money(outflowCents),
     inflowEur:money(inflowCents),
     netEur:money(inflowCents-outflowCents),
+    outflowMilliunits:outflowCents*10,
+    inflowMilliunits:inflowCents*10,
+    netMilliunits:(inflowCents-outflowCents)*10,
     byType:Object.fromEntries([...byType.entries()]),
     byReason:Object.fromEntries([...byReason.entries()]),
     imported:0,

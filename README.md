@@ -64,3 +64,7 @@ Use the same Shortcut with endpoint `/preview` instead of `/inspect`, and send t
 - No YNAB token, no D1 and no POST to YNAB yet; `imported: 0` always.
 
 Satispay users who track only wallet money should *not* count Buoni Pasto or FlexBen as YNAB expenses. Future Fineco ↔ Satispay recharges must be transfers instead of income or expenses. Validate the live preview and match it to your weekly reconciliation before turning on writes.
+
+## Precisione monetaria
+
+In `/preview`, `outflowEur`, `inflowEur` e `netEur` sono **stringhe decimali a due cifre** (per esempio `"90.23"`). I campi `outflowMilliunits`, `inflowMilliunits` e `netMilliunits` sono numeri interi esatti per YNAB (per esempio `90230`). Questo evita rappresentazioni come `90.230000000000004` su Apple Shortcuts. La logica di importazione rimane disabilitata.
