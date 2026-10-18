@@ -4,10 +4,10 @@ Thanks for your interest in Satispay → YNAB!
 
 ## Set up your fork
 
-Follow the [Quick start](README.md#quick-start-from-fork-to-first-preview). Replace the tracked `wrangler.toml` with your own copy of `wrangler.example.toml`. Keep writes disabled until you review a dry run.
+Follow the [Quick start](README.md#quick-start-from-fork-to-first-preview). Replace the tracked `wrangler.toml` with your own copy of `wrangler.example.toml`. Set `UPLOAD_TOKEN`, `YNAB_TOKEN`, `YNAB_PLAN_ID` and `YNAB_ACCOUNT_ID` as Cloudflare Worker Secrets (or in a Git-ignored `.dev.vars` for local development). Keep writes disabled until you review a dry run. Never put real YNAB account identifiers in tracked `[vars]`.
 
 ```bash
-npm install
+npm ci
 npm test
 npm run check
 npm run check:bundle

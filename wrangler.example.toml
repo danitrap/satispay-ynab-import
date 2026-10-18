@@ -4,11 +4,10 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 workers_dev = true
 
-# Non-secret variables; set these to your own YNAB plan/account IDs.
+# Safe defaults. Configure UPLOAD_TOKEN, YNAB_TOKEN, YNAB_PLAN_ID,
+# and YNAB_ACCOUNT_ID as Worker Secrets (or in local .dev.vars).
 [vars]
 YNAB_WRITE_ENABLED = "false"
-YNAB_PLAN_ID = "<your-plan-id>"
-YNAB_ACCOUNT_ID = "<your-satispay-account-id>"
 YNAB_IMPORT_FROM = "2026-01-01"
 
 # Preview is always read-only; no production YNAB account identifiers here.

@@ -1,3 +1,5 @@
-# Copy this file to .dev.vars, replace both values, and NEVER commit .dev.vars.
+# Copy to .dev.vars for local development. Never commit your .dev.vars file.
 UPLOAD_TOKEN="replace-with-long-random-string"
 YNAB_TOKEN="replace-with-your-ynab-personal-access-token"
+YNAB_PLAN_ID="replace-with-your-ynab-plan-id"
+YNAB_ACCOUNT_ID="replace-with-your-satispay-account-id"

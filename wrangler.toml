@@ -3,19 +3,15 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 workers_dev = true
 
-# Non-secret runtime configuration is versioned in Git.
-# All values in [vars] will be applied by Wrangler during deployment.
+# Non-secret deployment settings live in Git. Keep production values
+# for YNAB_WRITE_ENABLED and YNAB_IMPORT_FROM unchanged.
 [vars]
 YNAB_WRITE_ENABLED = "true"
-
-# Plan and active on-budget Satispay account confirmed via YNAB account discovery.
-# The inclusive import cutoff is set to 2026-10-11 for controlled matching tests.
-YNAB_PLAN_ID = "774d71aa-9e22-4991-a4cd-1e37aecda617"
-YNAB_ACCOUNT_ID = "231101d1-9443-4f7e-a2ca-692199fc3b22"
 YNAB_IMPORT_FROM = "2026-10-11"
 
-# Secrets must ONLY be configured in Cloudflare, never in this file:
-# UPLOAD_TOKEN and YNAB_TOKEN
+# Configure these four as Cloudflare Worker Secrets, never in Git:
+# UPLOAD_TOKEN, YNAB_TOKEN, YNAB_PLAN_ID, YNAB_ACCOUNT_ID
+# Wrangler preserves existing Worker Secrets during normal deployments.
 
 # Worker Previews are isolated from production vars and secrets.
 # Keep write operations disabled and never point Previews at actual YNAB accounts.

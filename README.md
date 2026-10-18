@@ -91,24 +91,24 @@ name = "my-satispay-ynab-import"
 
 [vars]
 YNAB_WRITE_ENABLED = "false"
-YNAB_PLAN_ID = "<your-plan-id>"
-YNAB_ACCOUNT_ID = "<your-satispay-account-id>"
 YNAB_IMPORT_FROM = "2026-01-01"
 ~~~
+
+Store `YNAB_PLAN_ID` and `YNAB_ACCOUNT_ID` **as Worker Secrets**, alongside the two access tokens. None of the four belongs in versioned `[vars]` configuration.
 
 The date is only an example: set `YNAB_IMPORT_FROM` to the **first date you intend to import** (inclusive). Avoid importing history that is already reconciled in YNAB. Leave writes disabled until you've checked a dry run.
 
 > [!WARNING]
-> A fork may inherit the original repository's existing `wrangler.toml`, including deployment-specific settings. **Replace it with the example before deploying**. Also choose a unique Worker `name`. Never assume the values in somebody else's configuration are appropriate for your budget.
+> A fork inherits the tracked `wrangler.toml`, including a Worker name and an import cutoff. **Replace it with your own copy of the example before deploying**, and choose a unique Worker `name`. The four Secrets must be configured separately for each deployment.
 
 | Variable | What it does |
 | --- | --- |
-| `YNAB_PLAN_ID` | YNAB plan (budget) to write to |
-| `YNAB_ACCOUNT_ID` | Destination Satispay account in that plan |
-| `YNAB_IMPORT_FROM` | Inclusive `YYYY-MM-DD` cutoff for the import plan |
-| `YNAB_WRITE_ENABLED` | Explicit safety switch: `false` until you are ready |
-| `UPLOAD_TOKEN` | Secret authorizing access to the Worker |
-| `YNAB_TOKEN` | Secret YNAB API token |
+| `YNAB_PLAN_ID` | **Secret** — YNAB plan (budget) ID |
+| `YNAB_ACCOUNT_ID` | **Secret** — destination Satispay account ID |
+| `YNAB_IMPORT_FROM` | **`[vars]`** — inclusive `YYYY-MM-DD` import cutoff |
+| `YNAB_WRITE_ENABLED` | **`[vars]`** — explicit write switch; start with `false` |
+| `UPLOAD_TOKEN` | **Secret** — authorizes access to the Worker |
+| `YNAB_TOKEN` | **Secret** — YNAB personal access token |
 
 For local testing, copy the secrets template and fill in your own values:
 
@@ -117,11 +117,13 @@ cp .dev.vars.example .dev.vars
 npm run dev
 ~~~
 
-The `.dev.vars` file is ignored by Git. For a deployed Worker, set secrets with:
+The `.dev.vars` file is ignored by Git and must contain all four Secrets for local import tests. For a deployed Worker, set the Secrets through Cloudflare Settings → Variables and Secrets or with:
 
 ~~~bash
 npx wrangler secret put UPLOAD_TOKEN
 npx wrangler secret put YNAB_TOKEN
+npx wrangler secret put YNAB_PLAN_ID
+npx wrangler secret put YNAB_ACCOUNT_ID
 ~~~
 
 `UPLOAD_TOKEN` should be an independently generated, long random string, **not** your YNAB token.
@@ -135,7 +137,7 @@ curl -H "Authorization: Bearer <your-upload-token>" \
   "http://localhost:8787/ynab/accounts"
 ~~~
 
-The endpoint returns accessible, active YNAB accounts containing "Satispay" in their name, with their plan and account IDs. Copy the correct IDs into your `wrangler.toml` before importing.
+The endpoint returns accessible, active YNAB accounts containing "Satispay" in their name, including their plan and account IDs. Use those IDs to set the `YNAB_PLAN_ID` and `YNAB_ACCOUNT_ID` Secrets on the deployed Worker (and in your ignored local `.dev.vars`); do **not** add the IDs to `wrangler.toml`.
 
 To deploy:
 
@@ -143,7 +145,7 @@ To deploy:
 npm run deploy
 ~~~
 
-For Cloudflare Git-connected deployments, use **`npx wrangler deploy`** as the deploy command. Wrangler handles the TypeScript bundle; there is no separate build output directory to configure.
+For Cloudflare Git-connected deployments, use **`npx wrangler deploy`** as the deploy command. Wrangler handles the TypeScript bundle; there is no separate build output directory to configure. Wrangler preserves existing Worker Secrets on normal deployments, even when those Secret names are absent from `wrangler.toml`. The non-secret `[vars]` values are still controlled by the file.
 
 ### 4. Preview an export
 
@@ -348,7 +350,7 @@ GitHub Actions runs the test suite, TypeScript checks, and Wrangler bundle check
 
 ### Cloudflare Preview environments
 
-The example Wrangler configuration includes a separate `[previews.vars]` block, with YNAB writes **disabled** and placeholder account IDs. Cloudflare's `wrangler preview` expects its preview configuration to be explicit.
+The example Wrangler configuration includes a separate `[previews.vars]` block, with YNAB writes **disabled** and placeholder account IDs. These are deliberately fake Preview values, not production IDs. Cloudflare's `wrangler preview` expects its preview configuration to be explicit.
 
 Test `GET /health` without credentials. For authenticated endpoints, configure a **separate preview-only `UPLOAD_TOKEN`**. Do not copy production YNAB credentials into an untrusted Preview environment.
 
