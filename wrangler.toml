@@ -1,0 +1,7 @@
+name = "satispay-ynab-import"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# Do not put credentials in this file.
+# Set UPLOAD_TOKEN with `npx wrangler secret put UPLOAD_TOKEN`.
