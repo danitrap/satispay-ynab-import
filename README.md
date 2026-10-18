@@ -73,17 +73,21 @@ In `/preview`, `outflowEur`, `inflowEur` e `netEur` sono **stringhe decimali a d
 
 Il Worker implementa il percorso settimanale Excel → Apple Shortcuts → YNAB, **disabilitato per default**. I vecchi endpoint `/inspect` e `/preview` restano invariati.
 
-### Configurazione su Cloudflare
+### Configurazione Cloudflare e Wrangler
 
-In Workers → Settings → Variables and Secrets aggiungere:
+Le variabili non sensibili vanno versionate nel file `wrangler.toml`, nella sezione `[vars]`. Attualmente `YNAB_WRITE_ENABLED = "false"` è impostato e viene distribuito da GitHub. Aggiungere `YNAB_PLAN_ID`, `YNAB_ACCOUNT_ID` e `YNAB_IMPORT_FROM` **solo quando conosciamo i valori reali**. Non inserire placeholder effettivi.
+
+Le credenziali `UPLOAD_TOKEN` e `YNAB_TOKEN` rimangono **Secrets** in Cloudflare, non in Git. Le variabili dichiarate in `[vars]` prevalgono su eventuali omonime impostate manualmente nel dashboard ai deploy successivi.
+
+Riferimento delle impostazioni:
 
 | Key | Type | Descrizione |
 | --- | --- | --- |
 | `YNAB_TOKEN` | Secret | Personal Access Token da YNAB → Account Settings → Developer Settings |
-| `YNAB_PLAN_ID` | Variable | UUID del piano YNAB; non usare valori inventati |
-| `YNAB_ACCOUNT_ID` | Variable | UUID dell'account Satispay **on-budget** esistente |
-| `YNAB_IMPORT_FROM` | Variable | Data ISO YYYY-MM-DD **inclusiva**: prima data che vuoi importare; consigliato il giorno successivo all'ultima data già completamente riconciliata |
-| `YNAB_WRITE_ENABLED` | Variable | Tenere `false` durante i primi test; usare `true` soltanto quando si è pronti |
+| `YNAB_PLAN_ID` | Wrangler `[vars]` | UUID del piano YNAB; non usare valori inventati |
+| `YNAB_ACCOUNT_ID` | Wrangler `[vars]` | UUID dell'account Satispay **on-budget** esistente |
+| `YNAB_IMPORT_FROM` | Wrangler `[vars]` | Data ISO YYYY-MM-DD **inclusiva**: prima data che vuoi importare; consigliato il giorno successivo all'ultima data già completamente riconciliata |
+| `YNAB_WRITE_ENABLED` | Wrangler `[vars]` | Tenere `false` durante i primi test; usare `true` soltanto quando si è pronti |
 | `UPLOAD_TOKEN` | Secret | Token già usato nello Shortcut |
 
 I secret vanno inseriti solo in Cloudflare, **mai in chat o su GitHub**.
