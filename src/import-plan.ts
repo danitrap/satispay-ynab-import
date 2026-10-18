@@ -72,15 +72,15 @@ export function buildImportPlan(rows: SheetCell[][], fromDate:string):ImportPlan
     const id=text(idCell);
     if (!id || typeof idCell!=="string" || ids.get(id)!==1) {issue("missing_nontext_or_duplicate_id");continue;}
     if (text(row[get("Stato")])!=="✅ Approvato") {issue("not_approved");continue;}
+    // Every wallet movement is imported by sign, with no automatic transfers.
     const type=text(row[get("Tipo")]);
-    const isPayment=type==="🏬 a un Negozio" && amount<0;
-    const isCredit=(type==="🎖️ Punti" || type==="Rimborso") && amount>0;
-    if (!isPayment && !isCredit) {issue("unknown_or_transfer_type");continue;}
     const rawPayee=text(row[get("Nome")]);
+    const fallbackPayee=type ? "Satispay — "+type : "Satispay";
+    const payee=rawPayee && rawPayee!=="-" ? rawPayee : fallbackPayee;
     const memo=text(row[get("Descrizione")]);
     candidates.push({
       satispayId:id,date,amountMilliunits:amount,
-      payee:isCredit && type==="🎖️ Punti" ? "Satispay Cashback" : safeLabel(rawPayee,"Satispay",80),
+      payee:amount>0 && type==="🎖️ Punti" ? "Satispay Cashback" : safeLabel(payee,"Satispay",80),
       memo:safeLabel(memo,"",200),type
     });
   }

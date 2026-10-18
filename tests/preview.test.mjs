@@ -18,9 +18,17 @@ test('only moves in Disponibilità and no benefits spending',()=>{
   assert.equal(JSON.stringify(p).includes('Shop'),false);
   assert.equal(JSON.stringify(p).includes('"a"'),false);
 });
-test('unknown movement and top-up must be reviewed',()=>{
- const p=previewSatispay([hdr,[day,'Bank','recharge',50,'Ricarica','✅ Approvato',50,null,null,150,'abc']]);
- assert.equal(p.requiresReview,1);assert.equal(p.eligible,0);
+test('unknown wallet outflows and bank top-ups are included by sign',()=>{
+ const p=previewSatispay([hdr,
+   [day,'-','unknown transaction',-4,'Altro','✅ Approvato',-4,null,null,90,'other'],
+   [day,'Bank','recharge',50,'🏦 Dalla Banca','✅ Approvato',50,null,null,140,'bank']
+ ]);
+ assert.equal(p.requiresReview,0);
+ assert.equal(p.eligible,2);
+ assert.equal(p.byReason.wallet_outflow,1);
+ assert.equal(p.byReason.wallet_inflow,1);
+ assert.equal(p.outflowEur,'4.00');
+ assert.equal(p.inflowEur,'50.00');
 });
 test('identical IDs and bad statuses are blocked, zero values skipped',()=>{
  const p=previewSatispay([hdr,

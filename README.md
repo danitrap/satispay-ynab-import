@@ -41,23 +41,24 @@ Non scegliere il formato JSON o Modulo e non impostare manualmente un header `mu
 
 `processed` **non equivale a nuove righe create in YNAB**: include anche movimenti abbinati a transazioni già inserite manualmente.
 
-## Regole contabili
+## Regole contabili: esclusivamente Disponibilità
 
-**Importiamo soltanto i movimenti della colonna `Disponibilità`.** Buoni Pasto e FlexBen non sono conti tracciati in YNAB.
+**Il segno del campo `Disponibilità` determina il movimento; il campo `Tipo` NON decide se importarlo.** È una scelta intenzionale: qualsiasi somma che esce dal wallet arriva su YNAB come uscita ordinaria, senza creare automaticamente trasferimenti fra conti. Tutti gli aggiustamenti (Fineco, salvadanai, altri conti) si fanno manualmente in YNAB dopo l'import.
 
-| Tipo di movimento | Comportamento |
+| Satispay | Come viene registrato in YNAB |
 | --- | --- |
-| `🏬 a un Negozio`, Disponibilità negativa | Spesa, solo quota pagata dal wallet |
-| Spesa interamente con Buoni Pasto o FlexBen | Ignorata |
-| Spesa mista wallet + benefit | Importata soltanto la parte di Disponibilità |
-| `🎖️ Punti`, Disponibilità positiva | Entrata, payee `Satispay Cashback` |
-| `Rimborso`, Disponibilità positiva | Entrata |
-| Disponibilità vuota o zero | Ignorata |
-| Tipo non riconosciuto con Disponibilità valorizzata | Batch bloccato e segnalato per revisione |
+| `Disponibilità` negativa | **Uscita ordinaria**, per qualunque tipo: negozio, carta, P2P, risparmi, investimenti, `Altro`, tipo mai visto |
+| `Disponibilità` positiva | **Entrata ordinaria**, incluse ricariche `🏦 Dalla Banca`, bonifici, denaro ricevuto, rimborsi e Punti |
+| `Disponibilità` vuota o zero | Ignorata: non è stato movimentato il wallet |
+| Spesa mista wallet + Buoni Pasto/FlexBen | Importata **soltanto la quota `Disponibilità`** |
+| Spesa interamente con Buoni Pasto/FlexBen | Ignorata |
+| `🎖️ Punti` con accredito | Entrata con payee `Satispay Cashback` |
 
-La ricarica principale del wallet proviene da **Fineco**, non Revolut. **Le ricariche Fineco → Satispay non sono ancora gestite automaticamente**: dovranno diventare trasferimenti fra conti in YNAB, non entrate. Fino a quando non implementiamo il mapping, un tipo non riconosciuto con movimento di Disponibilità può bloccare l'intero import.
+Il payee viene preso da `Nome`. Quando `Nome` è vuoto o contiene `-` (per esempio nei movimenti `Altro`), il Worker usa `Satispay — <Tipo>` come descrizione riconoscibile, così puoi riclassificarlo comodamente.
 
-Per le righe importabili sono obbligatori stato `✅ Approvato`, data valida, importo rappresentabile in centesimi e ID transazione testuale, non vuoto e univoco nel file.
+**Esempio:** una ricarica Fineco → Satispay di 100 € viene inizialmente importata sul conto Satispay come **entrata di 100 €**, non come transfer. Se Fineco è già tracciato in YNAB, dovrai convertirla tu in trasferimento per non contare due volte il movimento e per non gonfiare il reddito. Vale lo stesso per uscite verso salvadanai o investimenti: correggerai il payee in YNAB quando opportuno.
+
+Il tipo, anche se sconosciuto, **non blocca più il batch**. Rimangono controlli bloccanti sui movimenti di Disponibilità: data valida, stato esatto `✅ Approvato`, ID Satispay testuale/presente/univoco nel file e importo rappresentabile in centesimi. Una riga problematica viene esclusa dalle candidate, e la presenza di righe rifiutate blocca l'intera chiamata a `/import`. Nessun automatic transfer viene creato.
 
 ## Matching, deduplica e periodo di import
 
@@ -145,14 +146,18 @@ Per usare il Worker in locale, crea `.dev.vars` con i Secret di sviluppo (file e
 ## Sicurezza e limiti noti
 
 - Il Worker verifica che l'account YNAB di destinazione sia aperto, on-budget e abbia un nome contenente “Satispay”.
-- I batch con transazioni ambigue vengono bloccati completamente prima di scrivere.
+- I batch con date, ID, stato o importi non validi vengono bloccati completamente prima di scrivere. Un tipo Satispay sconosciuto è ammesso.
 - Nessun export viene salvato: il file viene letto e processato in memoria. Le risposte non includono ID Satispay, nomi dei beneficiari, descrizioni o importi delle singole transazioni.
 - Ogni import è **on-demand** e richiede un file Excel; non esiste accesso automatico all'account consumer Satispay.
-- Non inviare export finanziari reali al repository GitHub. Non è ancora gestito il mapping delle ricariche Fineco né di nuove tipologie Satispay.
-- Se YNAB non trova un abbinamento, può creare un movimento nuovo che dovrai controllare prima della riconciliazione.
+- Non inviare export finanziari reali al repository GitHub. Le ricariche Fineco, gli spostamenti verso salvadanai e gli altri movimenti sono importati come entrate/uscite ordinarie, senza transfer automatici; riclassificali manualmente in YNAB.
+- Se YNAB non trova un abbinamento, può creare un movimento nuovo che dovrai controllare prima della riconciliazione. Verifica soprattutto le ricariche e i movimenti fra conti propri.
 
 ## Test end-to-end
 
 **18 ottobre 2026:** export con 23 righe, soglia 11/10/2026, 5 movimenti candidati, 16 anteriori alla soglia e 2 senza variazione di Disponibilità. Il batch inviato a YNAB aveva uscite da 30,40 €, entrate da 3,39 € e netto da −27,01 €. La verifica nell'app YNAB ha confermato matching corretto e **zero duplicati visibili**.
 
 Il successo di questo test non garantisce il matching di tutti i movimenti futuri: continua a controllare YNAB dopo ogni import.
+
+### Evoluzione del mapping — 18 ottobre 2026
+
+L'esame dell'export storico Satispay (302 righe) ha mostrato ricariche bancarie, trasferimenti P2P, pagamenti con carta, movimenti verso salvadanai/investimenti e righe `Altro`. Su richiesta dell'utente il Worker è stato semplificato: **tutti i movimenti di Disponibilità con segno negativo diventano uscite, quelli positivi entrate; nessuna classificazione a transfer**. L'approvazione, la riclassificazione delle ricariche/trasferimenti e la riconciliazione restano manuali in YNAB. Gli `import_id` non sono stati modificati.

@@ -7,9 +7,6 @@ export type PreviewRow = {
   amountMilliunits?: number;
 };
 
-const knownPaymentTypes = new Set(["🏬 a un Negozio"]);
-const knownCreditTypes = new Set(["🎖️ Punti", "Rimborso"]);
-
 function cellText(value: Cell): string {
   return value === undefined || value === null ? "" : String(value).trim();
 }
@@ -29,9 +26,7 @@ function classify(type: string, amountCents: number, status: string, dateValid: 
   if (!validId) return { decision: "review", reason: "missing_or_duplicate_id", type };
   if (!dateValid) return { decision: "review", reason: "invalid_date", type };
   if (status !== "✅ Approvato") return { decision: "review", reason: "not_approved", type };
-  if (knownPaymentTypes.has(type)) return { decision: "include", reason: amountCents < 0 ? "payment" : "merchant_credit", type, amountMilliunits: amountCents * 10 };
-  if (knownCreditTypes.has(type) && amountCents > 0) return { decision: "include", reason: "cashback_or_refund", type, amountMilliunits: amountCents * 10 };
-  return { decision: "review", reason: "type_requires_mapping", type };
+  return { decision: "include", reason: amountCents < 0 ? "wallet_outflow" : "wallet_inflow", type, amountMilliunits: amountCents * 10 };
 }
 
 export function previewSatispay(rows: Cell[][]) {
@@ -65,7 +60,7 @@ export function previewSatispay(rows: Cell[][]) {
     else if (cents === 0) result={decision:"skip",reason:"zero_availability_movement",type};
     else {
       const id=cellText(row[idIndex]);
-      result=classify(type,cents,cellText(row[find("Stato")]),isValidDate(row[find("Data")]),id !== "" && idCounts.get(id) === 1);
+      result=classify(type,cents,cellText(row[find("Stato")]),isValidDate(row[find("Data")]),id !== "" && typeof row[idIndex] === "string" && idCounts.get(id) === 1);
     }
     all.push(result);
     const bucket=byType.get(type) ?? {include:0,skip:0,review:0};
@@ -99,6 +94,6 @@ export function previewSatispay(rows: Cell[][]) {
     byType:Object.fromEntries([...byType.entries()]),
     byReason:Object.fromEntries([...byReason.entries()]),
     imported:0,
-    message:"Dry run only. No transactions sent to YNAB; Fineco top-ups need transfer handling before live import."
+    message:"Dry run only. No transactions sent to YNAB. Transfers can be adjusted manually in YNAB."
   };
 }

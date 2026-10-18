@@ -21,16 +21,46 @@ test("imports wallet portion, skips meal vouchers and already reconciled dates",
   assert.equal(plan.counts.olderThanStart,1);
   assert.equal(summarizeImportPlan(plan).netMilliunits,-2010);
 });
-test("duplicate IDs and unknown Fineco topups are blocked",()=>{
+test("duplicate IDs stay blocked, bank top-ups are ordinary inflows",()=>{
   const plan=buildImportPlan([headers,
     row("dup",-4),
     row("dup",-2),
-    row("topup",50,"Ricarica")
+    row("topup",50,"🏦 Dalla Banca")
   ],"2026-10-01");
-  assert.equal(plan.candidates.length,0);
+  assert.equal(plan.candidates.length,1);
+  assert.equal(plan.candidates[0].amountMilliunits,50000);
   assert.equal(plan.issues.missing_nontext_or_duplicate_id,2);
-  assert.equal(plan.issues.unknown_or_transfer_type,1);
+  assert.equal(plan.issues.unknown_or_transfer_type,undefined);
 });
+test("any Disponibilità outflow imports as a normal expense even for unknown types and savings",()=>{
+  const plan=buildImportPlan([headers,
+    row("p2p",-12,"👤 a una Persona"),
+    row("saving",-95,"🛡️ Deposito Risparmi"),
+    row("investment",-500,"📈 Investimento - deposito"),
+    row("card",-8.50,"Carta ••2156"),
+    [day,"-","",-3,"Altro","✅ Approvato",-3,null,null,10,"unknown"],
+    row("gift",-100,"💳 Carta Regalo")
+  ],"2026-10-01");
+  assert.equal(plan.candidates.length,6);
+  assert.equal(plan.counts.rejected,0);
+  assert.equal(plan.outflowMilliunits,718500);
+  assert.equal(plan.inflowMilliunits,0);
+  assert.equal(plan.candidates.find(t=>t.satispayId==="unknown").payee,"Satispay — Altro");
+});
+test("any Disponibilità inflow imports as ordinary inflow including bank, P2P and refunds",()=>{
+  const plan=buildImportPlan([headers,
+    row("bank",254.35,"🏦 Dalla Banca"),
+    row("iban",3574.88,"🏦 Bonifico Bancario in Entrata"),
+    row("p2p",10,"👤 da una Persona"),
+    row("cashback",3.39,"🎖️ Punti"),
+    row("refund",5,"🔄 Rimborso")
+  ],"2026-10-01");
+  assert.equal(plan.candidates.length,5);
+  assert.equal(plan.inflowMilliunits,3847620);
+  assert.equal(plan.candidates.find(t=>t.satispayId==="cashback").payee,"Satispay Cashback");
+  assert.equal(plan.counts.rejected,0);
+});
+
 test("import IDs are deterministic, privacy preserving and at most 36 chars",async()=>{
   const a=await importId("external-private-id-123");
   assert.equal(a.length,36);
