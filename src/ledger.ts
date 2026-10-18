@@ -94,8 +94,9 @@ export function analyzeLedger(rows:SheetCell[][]):{
       refundsUnresolved++;
       continue;
     }
-    resolved[i]={amountCents:-walletSpent,adjusted:-walletSpent!==reported};
-    if(-walletSpent!==reported)refundsAdjusted++;
+    const refundedCents=walletSpent===0 ? 0 : -walletSpent;
+    resolved[i]={amountCents:refundedCents,adjusted:refundedCents!==reported};
+    if(refundedCents!==reported)refundsAdjusted++;
   }
 
   const saldo=idx("Disponibilità dopo la transazione");
