@@ -11,7 +11,8 @@ const UPLOAD_PATHS=new Set(["/inspect","/preview","/prepare","/import"]);
 
 class UploadError extends Error {
   readonly _tag="UploadError";
-  constructor(message:string,readonly status=400){super(message);this.name="UploadError";}
+  readonly status:number;
+  constructor(message:string,status=400){super(message);this.name="UploadError";this.status=status;}
 }
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{
   status,
