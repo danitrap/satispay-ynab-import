@@ -14,6 +14,12 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --no-audit --no-fund
+      - name: Export generated package-lock.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-lockfile
+          path: package-lock.json
+          if-no-files-found: error
       - run: npm test
       - run: npm run check
       - run: npm run check:bundle
