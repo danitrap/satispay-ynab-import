@@ -2,7 +2,7 @@
 
 Cloudflare Worker for uploading an Excel **.xlsx** or CSV export from Satispay using the iOS Share Sheet and Apple Shortcuts.
 
-**Safety:** this phase only inspects the file format, worksheet headers and row count. No YNAB API calls or file storage are implemented.
+**Safety:** this phase inspects file format, headers, row count and aggregate schema diagnostics (types/statuses, ID uniqueness and financial-field shapes). No individual transaction data is returned. No YNAB API calls or file storage are implemented.
 
 ## Deploy
 
@@ -33,7 +33,7 @@ The Worker now accepts raw request bodies (ideal for Shortcuts) and still suppor
 
 `GET /health`: returns `ok`, `mode: "inspect-only"`, `formats: ["xlsx","csv"]`, `upload: ["raw","multipart"]`.
 
-`POST /inspect`: bearer token required, binary file in request body or multipart field `file`. Response contains `columns`, `rowCount`, `format`, and `imported: 0`. File content is held in memory and discarded. Maximum file size 4 MB, maximum request size 4.5 MB.
+`POST /inspect`: bearer token required, binary file in request body or multipart field `file`. Response contains `columns`, `rowCount`, `format`, `analysis` and `imported: 0`. Analysis only contains counts and categorical values, never individual names, descriptions, amounts, IDs or ledger balances. File content is held in memory and discarded. Maximum file size 4 MB, maximum request size 4.5 MB.
 
 Example with CSV (same upload mechanism as Excel):
 
