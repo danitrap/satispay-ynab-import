@@ -7,19 +7,26 @@ jobs:
   test:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: true
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: npm install --no-audit --no-fund
-      - name: Export generated package-lock.json
-        uses: actions/upload-artifact@v4
-        with:
-          name: npm-lockfile
-          path: package-lock.json
-          if-no-files-found: error
+      - name: Commit generated lockfile to upgrade branch
+        if: github.event_name == 'pull_request' && github.head_ref == 'chore/update-dependencies-typescript-7'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: lock upgraded npm dependencies"
+            git push origin HEAD:refs/heads/chore/update-dependencies-typescript-7
+          fi
       - run: npm test
       - run: npm run check
       - run: npm run check:bundle
