@@ -6,7 +6,7 @@ workers_dev = true
 # Non-secret runtime configuration is versioned in Git.
 # All values in [vars] will be applied by Wrangler during deployment.
 [vars]
-YNAB_WRITE_ENABLED = "false"
+YNAB_WRITE_ENABLED = "true"
 
 # Plan and active on-budget Satispay account confirmed via YNAB account discovery.
 # The inclusive import cutoff is set to 2026-10-11 for controlled matching tests.
