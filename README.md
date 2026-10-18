@@ -363,9 +363,11 @@ Test `GET /health` without credentials. For authenticated endpoints, configure a
 
 ## Contributing
 
-Issues and pull requests are welcome. For changes to financial logic, include regression tests covering monetary precision, mixed funding, refunds, duplicate IDs, and idempotency. For HTTP or service changes, add tests using the Effect Test Layer or a fake HTTP transport.
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, financial-correctness requirements, and privacy guidelines. Use only synthetic exports and credentials in issues or pull requests.
 
-Please use **synthetic exports and tokens** in issues, tests, and pull requests. Never attach production financial statements, account identifiers, or credentials.
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE). See [LICENSE](LICENSE) for the full terms.
 
 ---
 
