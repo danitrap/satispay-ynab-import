@@ -72,7 +72,7 @@ Fork this repository on GitHub, then clone **your fork**:
 ~~~bash
 git clone https://github.com/<your-user>/satispay-ynab-import.git
 cd satispay-ynab-import
-npm install
+npm ci
 ~~~
 
 ### 2. Set up your own Worker
@@ -331,8 +331,10 @@ The domain modules stay independent of Effect. There is no global runtime holdin
 
 ## Development
 
+Use `npm ci` to install the exact dependency versions recorded in `package-lock.json` (Node.js 22+).
+
 ~~~bash
-npm install
+npm ci
 npm test                # Test suite
 npm run check           # TypeScript type check
 npm run check:bundle    # Wrangler dry-run bundle (no deployment)
