@@ -68,7 +68,7 @@ export default {
     if (contentType.toLowerCase().startsWith("multipart/form-data")) {
       try {
         const copied = new Request("https://local.invalid/inspect", {
-          method: "POST", headers: { "Content-Type": contentType }, body
+          method: "POST", headers: { "Content-Type": contentType }, body: body.buffer as ArrayBuffer
         });
         const form = await copied.formData();
         const part = form.get("file");

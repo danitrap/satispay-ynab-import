@@ -92,10 +92,10 @@ export function summarizeSheet(rows: SheetCell[][]) {
 }
 export async function inspectXlsx(file: ArrayBuffer) {
   const { readSheet } = await import("read-excel-file/universal");
-  return summarizeSheet(await readSheet(file));
+  return summarizeSheet(await readSheet(file) as unknown as SheetCell[][]);
 }
 
 export async function previewXlsx(file: ArrayBuffer) {
   const { readSheet } = await import("read-excel-file/universal");
-  return previewSatispay(await readSheet(file));
+  return previewSatispay(await readSheet(file) as unknown as SheetCell[][]);
 }

@@ -1,4 +1,5 @@
 import { buildImportPlan, summarizeImportPlan } from "./import-plan.ts";
+import type { SheetCell } from "./spreadsheet.ts";
 import { sendToYnab, type YnabEnv } from "./ynab.ts";
 export async function processImport(
   mode:"prepare"|"import",
@@ -9,7 +10,7 @@ export async function processImport(
     return {status:409,body:{ok:false,error:"Configure YNAB_IMPORT_FROM (YYYY-MM-DD) to exclude previously reconciled history"}};
   }
   const {readSheet}=await import("read-excel-file/universal");
-  const plan=buildImportPlan(await readSheet(bytes),env.YNAB_IMPORT_FROM);
+  const plan=buildImportPlan(await readSheet(bytes) as unknown as SheetCell[][],env.YNAB_IMPORT_FROM);
   const summary=summarizeImportPlan(plan);
   if(mode==="prepare"){
     return {status:200,body:{ok:true,mode:"import-preview",...summary,imported:0,
