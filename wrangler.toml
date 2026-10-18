@@ -8,10 +8,10 @@ workers_dev = true
 [vars]
 YNAB_WRITE_ENABLED = "false"
 
-# Add these only after retrieving the actual IDs and agreeing on the
-# first date that should be imported. Do NOT commit placeholders.
-# YNAB_PLAN_ID = "<real plan UUID>"
-# YNAB_ACCOUNT_ID = "<real Satispay account UUID>"
+# Plan and active on-budget Satispay account confirmed via YNAB account discovery.
+# Keep the start date unset until the user chooses the first import date.
+YNAB_PLAN_ID = "774d71aa-9e22-4991-a4cd-1e37aecda617"
+YNAB_ACCOUNT_ID = "231101d1-9443-4f7e-a2ca-692199fc3b22"
 # YNAB_IMPORT_FROM = "YYYY-MM-DD"
 
 # Secrets must ONLY be configured in Cloudflare, never in this file:
