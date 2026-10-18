@@ -81,10 +81,16 @@ export async function sendToYnab(plan:ImportPlan,env:YnabEnv,fetchFn:ApiFetch=fe
   if(plan.counts.rejected>0)throw new Error("Ambiguous transactions found: no YNAB writes performed");
   if(plan.candidates.length>100)throw new Error("Over 100 movements: use a shorter export");
   await validateTargetAccount(env,fetchFn);
-  if(!plan.candidates.length)return {submitted:0,acceptedOrMatched:0,duplicateImports:0};
+  if(!plan.candidates.length)return {submitted:0,processed:0,duplicateImports:0,ynabReportedTransactionIds:0};
   const transactions=await buildYnabTransactions(plan.candidates,env.YNAB_ACCOUNT_ID!);
   const data=await api("/plans/"+encodeURIComponent(env.YNAB_PLAN_ID!)+"/transactions",requireToken(env),"POST",{transactions},fetchFn);
   if(!Array.isArray(data.transaction_ids) || !Array.isArray(data.duplicate_import_ids))
     throw new Error("Unexpected YNAB response: verify results in YNAB before retrying");
-  return {submitted:transactions.length,acceptedOrMatched:data.transaction_ids.length,duplicateImports:data.duplicate_import_ids.length};
+  // The API may return multiple transaction IDs for a single submitted movement
+  // (e.g. matching an existing manually-entered transaction). Do not use that
+  // array length as the number of Satispay movements processed.
+  const submitted=transactions.length;
+  const duplicateImports=data.duplicate_import_ids.length;
+  if(duplicateImports>submitted)throw new Error("Unexpected YNAB duplicate import count");
+  return {submitted,processed:submitted-duplicateImports,duplicateImports,ynabReportedTransactionIds:data.transaction_ids.length};
 }

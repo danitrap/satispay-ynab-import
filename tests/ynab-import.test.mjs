@@ -73,7 +73,7 @@ test("YNAB import accepts successful batch with duplicate_import_ids",async()=>{
     return new Response(JSON.stringify({data:{transaction_ids:["trans-1"],duplicate_import_ids:[]}}),{status:200});
   };
   const result=await sendToYnab(plan,{YNAB_TOKEN:"fake",YNAB_PLAN_ID:"plan",YNAB_ACCOUNT_ID:"target",YNAB_WRITE_ENABLED:"true"},mock);
-  assert.deepEqual(result,{submitted:1,acceptedOrMatched:1,duplicateImports:0});
+  assert.deepEqual(result,{submitted:1,processed:1,duplicateImports:0,ynabReportedTransactionIds:1});
   assert.match(calls[1].url,/\/v1\/plans\/plan\/transactions$/);
   assert.equal(calls[1].body.transactions[0].payee_name,"Negozio A");
 });
@@ -86,4 +86,26 @@ test("account discovery only returns accounts named Satispay",async()=>{
  const r=await findSatispayAccounts({YNAB_TOKEN:"test"},mock);
  assert.equal(r.matches.length,1);
  assert.equal(r.matches[0].accountId,"sat");
+});
+
+test("matched transaction IDs do not inflate processed movement count",async()=>{
+  const plan=buildImportPlan([headers,row("first",-1),row("second",-2)],"2026-10-01");
+  const mock=async(_url,init)=>{
+    if(init.method==="GET")return new Response(JSON.stringify({data:{account:{id:"target",name:"Satispay",on_budget:true,closed:false}}}),{status:200});
+    // YNAB may report multiple underlying transaction IDs for a match.
+    return new Response(JSON.stringify({data:{transaction_ids:["a","b","c","d"],duplicate_import_ids:[]}}),{status:201});
+  };
+  const result=await sendToYnab(plan,{YNAB_TOKEN:"test",YNAB_PLAN_ID:"plan",YNAB_ACCOUNT_ID:"target",YNAB_WRITE_ENABLED:"true"},mock);
+  assert.deepEqual(result,{submitted:2,processed:2,duplicateImports:0,ynabReportedTransactionIds:4});
+});
+test("repeated import IDs count as duplicates, not processed movements",async()=>{
+  const plan=buildImportPlan([headers,row("first",-1),row("second",-2)],"2026-10-01");
+  const mock=async(_url,init)=>{
+    if(init.method==="GET")return new Response(JSON.stringify({data:{account:{id:"target",name:"Satispay",on_budget:true,closed:false}}}),{status:200});
+    return new Response(JSON.stringify({data:{transaction_ids:[],duplicate_import_ids:["SPS:one","SPS:two"]}}),{status:201});
+  };
+  const result=await sendToYnab(plan,{YNAB_TOKEN:"test",YNAB_PLAN_ID:"plan",YNAB_ACCOUNT_ID:"target",YNAB_WRITE_ENABLED:"true"},mock);
+  assert.equal(result.processed,0);
+  assert.equal(result.duplicateImports,2);
+  assert.equal(result.ynabReportedTransactionIds,0);
 });

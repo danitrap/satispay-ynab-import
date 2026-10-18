@@ -121,3 +121,11 @@ Rieseguire lo stesso export è sicuro per gli elementi già importati da **quest
 - `POST /import` — accetta solo Excel, richiede `Authorization` e `X-Confirm-Import: yes`, una data di inizio, token e account YNAB validi e `YNAB_WRITE_ENABLED=true`. Rifiuta il batch intero se trova movimenti ambigui.
 
 Non usare `/import` per importare l'intero storico senza aver scelto accuratamente la data di partenza.
+
+## How to interpret the YNAB batch result
+
+- `submitted`: movements sent from Satispay.
+- `processed` (also exposed as legacy `imported`): submitted movements minus `duplicateImports`. They may have been matched to existing manual entries or created anew; **not** a count of newly created YNAB rows.
+- `duplicateImports`: movement import IDs that YNAB has already seen.
+- `ynabReportedTransactionIds`: length of the raw YNAB `transaction_ids` array; this can be larger than `submitted` when existing transactions are matched. It is provided only for diagnostics.
+- The exact number of matches versus newly created transactions is not inferred from this API response. Inspect YNAB to verify.

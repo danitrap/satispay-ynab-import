@@ -23,8 +23,8 @@ export async function processImport(
   try{
     const result=await sendToYnab(plan,env);
     return {status:200,body:{ok:true,mode:"import-completed",...summary,...result,
-      imported:result.acceptedOrMatched,
-      message:"YNAB accepted the batch. Approve and reconcile Satispay in YNAB."}};
+      imported:result.processed,
+      message:"YNAB processed the batch (new or matched transactions). Review and reconcile Satispay in YNAB."}};
   }catch(e){
     return {status:502,body:{ok:false,mode:"import-failed",...summary,
       error:e instanceof Error?e.message:"YNAB import failed"}};
