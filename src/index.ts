@@ -119,9 +119,16 @@ export function handleRequestEffect(request:Request,env:Env) {
         const result=yield* processImportEffect(url.pathname==="/import"?"import":"prepare",bytes.buffer as ArrayBuffer,env);
         return json(result.body,result.status);
       }
-      return yield* (preview ? previewXlsxEffect(bytes.buffer as ArrayBuffer):inspectXlsxEffect(bytes.buffer as ArrayBuffer)).pipe(
+      if(preview) {
+        return yield* previewXlsxEffect(bytes.buffer as ArrayBuffer).pipe(
+          Effect.map(data=>json({ok:true,format:"xlsx",fileName,...data,imported:0,
+            message:"Dry run only: nothing sent to YNAB."})),
+          Effect.catch(()=>Effect.succeed(json({ok:false,error:"Cannot parse XLSX workbook. Check the exported Excel file."},422)))
+        );
+      }
+      return yield* inspectXlsxEffect(bytes.buffer as ArrayBuffer).pipe(
         Effect.map(data=>json({ok:true,format:"xlsx",fileName,...data,imported:0,
-          message:preview?"Dry run only: nothing sent to YNAB.":"Excel received and parsed. Nothing sent to YNAB."})),
+          message:"Excel received and parsed. Nothing sent to YNAB."})),
         Effect.catch(()=>Effect.succeed(json({ok:false,error:"Cannot parse XLSX workbook. Check the exported Excel file."},422)))
       );
     }
