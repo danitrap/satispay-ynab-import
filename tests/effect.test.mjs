@@ -2,7 +2,8 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
-import { sendToYnabEffect, importIdEffect, YnabError } from "../src/ynab.ts";
+import { importIdEffect } from "../src/ynab.ts";
+import { ynabLiveLayer, importPlanEffect, findAccountsEffect } from "../src/ynab-service.ts";
 import { readSheetEffect, WorkbookError } from "../src/spreadsheet.ts";
 
 test("Cloudflare request handler is an Effect and retains unauthorized protection", async()=>{
@@ -13,7 +14,7 @@ test("Cloudflare request handler is an Effect and retains unauthorized protectio
 });
 test("Effect YNAB program prevents writes while disabled",async()=>{
   const plan={counts:{rejected:0},candidates:[]};
-  const result=await Effect.runPromiseExit(sendToYnabEffect(plan,{YNAB_WRITE_ENABLED:"false"}));
+  const result=await Effect.runPromiseExit(importPlanEffect(plan).pipe(Effect.provide(ynabLiveLayer({YNAB_WRITE_ENABLED:"false"}))));
   assert.equal(result._tag,"Failure");
 });
 test("Effect SHA-256 import ids preserve deterministic legacy form",async()=>{
@@ -29,10 +30,9 @@ test("invalid Excel produces typed WorkbookError",async()=>{
 });
 
 test("Effect decodes YNAB plans instead of trusting an untyped response",async()=>{
-  const {findSatispayAccountsEffect}=await import("../src/ynab.ts");
   const fetchFn=async()=>new Response(JSON.stringify({data:{plans:[{id:123,name:"wrong"}]}}),{status:200});
   await assert.rejects(
-    Effect.runPromise(findSatispayAccountsEffect({YNAB_TOKEN:"test"},fetchFn)),
+    Effect.runPromise(findAccountsEffect.pipe(Effect.provide(ynabLiveLayer({YNAB_TOKEN:"test"},fetchFn)))),
     /Cannot list YNAB plans/
   );
 });
@@ -44,7 +44,7 @@ test("Effect validates account schema and never posts to unexpected account data
     if(options.method==="POST")postCount++;
     return new Response(JSON.stringify({data:{account:{id:"target",name:"Satispay",closed:false,on_budget:"true"}}}),{status:200});
   };
-  await assert.rejects(Effect.runPromise(sendToYnabEffect(plan,env,fetchFn)),/Target must be/);
+  await assert.rejects(Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(ynabLiveLayer(env,fetchFn)))),/Target must be/);
   assert.equal(postCount,0);
 });
 test("Effect refuses malformed successful YNAB POST responses without retrying writes",async()=>{
@@ -56,7 +56,7 @@ test("Effect refuses malformed successful YNAB POST responses without retrying w
     writes++;
     return new Response(JSON.stringify({data:{transaction_ids:["tx-1"],duplicate_import_ids:"not-an-array"}}),{status:200});
   };
-  await assert.rejects(Effect.runPromise(sendToYnabEffect(plan,env,fetchFn)),/Unexpected YNAB response/);
+  await assert.rejects(Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(ynabLiveLayer(env,fetchFn)))),/Unexpected YNAB response/);
   assert.equal(writes,1);
 });
 test("Effect import response distinguishes matched IDs from actual imported movements",async()=>{
@@ -66,7 +66,7 @@ test("Effect import response distinguishes matched IDs from actual imported move
     if(options.method==="GET")return new Response(JSON.stringify({data:{account:{id:"target",name:"Satispay",closed:false,on_budget:true}}}),{status:200});
     return new Response(JSON.stringify({data:{transaction_ids:["original","matched"],duplicate_import_ids:[]}}),{status:200});
   };
-  const result=await Effect.runPromise(sendToYnabEffect(plan,env,fetchFn));
+  const result=await Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(ynabLiveLayer(env,fetchFn))));
   assert.deepEqual(result,{submitted:1,processed:1,duplicateImports:0,ynabReportedTransactionIds:2});
 });
 test("Effect preserves input ordering when hashing imported IDs concurrently",async()=>{
