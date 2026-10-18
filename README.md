@@ -204,4 +204,10 @@ This branch uses the stable `effect@^4.0.2` runtime for side effects and orchest
 - **Pure domain** (`src/csv.ts`, `src/preview.ts`, `src/import-plan.ts`, `src/ledger.ts`): no Effect wrappers around basic math. Their deterministic computation is integrated into Effect via the calling pipeline.
 - The import ID prefix `SPS:`, SHA-256 input namespace and truncation, date cutoff, benefit allocation, mixed-refund logic, and all YNAB account safety guards are unchanged.
 
+### Cloudflare Worker Preview deployment
+
+The PR branch includes an isolated `[previews.vars]` section, required when the Cloudflare deployment command is `npx wrangler preview`. It intentionally sets `YNAB_WRITE_ENABLED = "false"` and uses placeholder YNAB plan/account UUIDs, so this preview **must not send transactions to a real YNAB plan**. Production `[vars]` are unchanged. Never copy production tokens into preview credentials.
+
+You can smoke-test the unauthenticated `GET /health` route on the resulting Preview URL. Testing authenticated endpoints requires a separate Preview-specific `UPLOAD_TOKEN` secret; YNAB account discovery and live importing are intentionally **not supported** in this safe Preview configuration.
+
 Run `npm test`, `npm run check`, and `npm run check:bundle` before considering merging; the last command produces a local dry-run bundle, **not a Cloudflare deployment**. The live Worker remains on `main` until this PR is merged. Existing Cloudflare Secrets and Wrangler vars are unchanged.
