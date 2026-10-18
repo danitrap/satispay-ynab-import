@@ -13,5 +13,8 @@
     "@cloudflare/workers-types": "^4.0.0",
     "typescript": "^5.8.0",
     "wrangler": "^4.0.0"
+  },
+  "dependencies": {
+    "read-excel-file": "^9.3.10"
   }
 }

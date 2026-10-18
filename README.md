@@ -1,74 +1,53 @@
-# Satispay → YNAB (fase 0: upload + CSV inspect)
+# Satispay → YNAB (inspect-only)
 
-Cloudflare Worker starter per il flusso iOS Share Sheet → Apple Shortcuts → Cloudflare Worker → (in futuro) YNAB.
+Cloudflare Worker for uploading an Excel **.xlsx** or CSV export from Satispay using the iOS Share Sheet and Apple Shortcuts.
 
-**Questa versione non importa nulla in YNAB.** Verifica il CSV e restituisce intestazioni, separatore e numero di righe, senza conservare il file e senza token YNAB.
+**Safety:** this phase only inspects the file format, worksheet headers and row count. No YNAB API calls or file storage are implemented.
 
-## Setup
+## Deploy
 
-Richiede Node.js >= 22 e Cloudflare:
+Node.js >= 22. Cloudflare Workers builds from GitHub with an empty build command and deploy command `npx wrangler deploy`.
 
-```bash
+```sh
 npm install
 npm test
-npx wrangler login
+npm run check
 npx wrangler secret put UPLOAD_TOKEN
 npm run deploy
 ```
 
-Generare un segreto casuale, ad esempio `openssl rand -hex 32`, e **non committarlo**. Per lo sviluppo locale, inserirlo in `.dev.vars` (`UPLOAD_TOKEN=...`; file escluso da Git).
+Create a random token (e.g. `openssl rand -hex 32`) and store it as `UPLOAD_TOKEN` in Cloudflare Workers Settings → Variables and Secrets. Never commit it. For local testing use `.dev.vars` (already gitignored).
 
-## Endpoint
+## iPhone Shortcut configuration
 
-```http
-POST https://satispay-ynab-import.<subdomain>.workers.dev/inspect
-Authorization: Bearer <UPLOAD_TOKEN>
-Content-Type: multipart/form-data
+1. In **Shortcuts**, create "Import Satispay" and enable **Show in Share Sheet**; accept files.
+2. Add **Get Contents of URL** with `https://satispay-ynab-import.daniele-trapani.workers.dev/inspect`.
+3. Method: `POST`; header `Authorization`: `Bearer YOUR_UPLOAD_TOKEN`.
+4. **Request Body → File → Shortcut Input**. Do not choose JSON or Form. Do not manually set `multipart/form-data`.
+5. Add **Show Result** (or extract `rowCount`, `columns`, `format` and `message` from the JSON).
+6. Export Excel from Satispay and share the .xlsx into your Shortcut. If necessary, save it to Files first and share it from there.
 
-file = export.csv
+The Worker now accepts raw request bodies (ideal for Shortcuts) and still supports multipart/form-data where the file field is called `file`. It detects XLSX by the ZIP signature, so a filename is not needed for raw uploads. Old binary `.xls` files are not supported.
+
+## API
+
+`GET /health`: returns `ok`, `mode: "inspect-only"`, `formats: ["xlsx","csv"]`, `upload: ["raw","multipart"]`.
+
+`POST /inspect`: bearer token required, binary file in request body or multipart field `file`. Response contains `columns`, `rowCount`, `format`, and `imported: 0`. File content is held in memory and discarded. Maximum file size 4 MB, maximum request size 4.5 MB.
+
+Example with CSV (same upload mechanism as Excel):
+
+```sh
+curl -X POST 'https://satispay-ynab-import.daniele-trapani.workers.dev/inspect' \
+  -H 'Authorization: Bearer YOUR_UPLOAD_TOKEN' \
+  -H 'Content-Type: application/octet-stream' \
+  --data-binary @samples/fake-export.csv
 ```
 
-L'endpoint `GET /health` è pubblico e risponde con la modalità corrente.
+For XLSX set Content-Type to `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (or leave it as octet-stream).
 
-Test manuale:
+## Next
 
-```bash
-npm run dev
-curl -sS -X POST http://127.0.0.1:8787/inspect \
-  -H 'Authorization: Bearer IL_TUO_TOKEN' \
-  -F 'file=@samples/fake-export.csv'
-```
+Inspect an actual Satispay export to identify columns, dates, amounts, account transfers and stable transaction IDs. Then add YNAB mapping, a D1 deduplication ledger, explicit preview and safe idempotent imports. A transfer from Revolut to Satispay must not become a duplicated expense.
 
-## Comando Rapido iOS
-
-1. Creare **Import Satispay → YNAB** nell'app Comandi Rapidi.
-2. Abilitare **Mostra nel foglio di condivisione** e accettare file in input.
-3. Aggiungere **Ottieni contenuti URL**, metodo POST, con l'URL del Worker e path `/inspect`.
-4. Impostare l'header `Authorization` a `Bearer IL_TUO_TOKEN`.
-5. Impostare corpo su **Modulo**, chiave `file`, tipo File, valore **Input comando rapido**.
-6. Visualizzare il JSON restituito con **Mostra risultato**.
-7. Esportare un CSV da Satispay, aprire il foglio di condivisione e scegliere lo Shortcut. Se necessario, salvare prima il CSV nell'app File.
-
-Il percorso e il formato di esportazione da Satispay su iOS sono ancora da verificare.
-
-## Sicurezza e limiti
-
-- `UPLOAD_TOKEN` è obbligatorio per `POST /inspect`.
-- Non inviare credenziali, token o export bancari reali su GitHub.
-- CSV max 1 MB, request body max 1.2 MB.
-- Il file è elaborato soltanto in memoria. La risposta include filename, intestazioni, separatore e conteggio righe, non i dati delle righe.
-- Lo Shortcut contiene un segreto: non condividerlo senza rimuovere il token.
-
-## Prossimi passi
-
-**Prima di abilitare scritture su YNAB serve analizzare un export reale** (possibilmente anonimizzato):
-
-1. Verificare colonne, data locale Europe/Rome, tipo transazione, controparte, segno e importo.
-2. Individuare un identificativo Satispay stabile, se presente.
-3. Aggiungere D1 per deduplicazione e storico.
-4. Implementare `POST /preview` per dry-run e `POST /import` solo dopo conferma.
-5. Aggiungere token YNAB come Cloudflare Secret e usare `import_id` deterministici.
-6. Gestire le ricariche da Revolut come trasferimenti e non spese duplicate.
-7. Allineare l'import allo Starting Balance e alla riconciliazione periodica di YNAB.
-
-**Workflow desiderato:** ogni settimana esportare il mese in corso, selezionare Condividi → Shortcut e importare soltanto le transazioni nuove. A inizio mese includere anche il mese precedente.
+Never upload raw financial exports, credentials, or access tokens to the GitHub repository.
