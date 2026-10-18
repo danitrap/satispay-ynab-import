@@ -1,7 +1,8 @@
 import { Effect } from "effect";
 import { buildImportPlan, summarizeImportPlan } from "./import-plan.ts";
 import { readSheetEffect } from "./spreadsheet.ts";
-import { sendToYnabEffect, type YnabEnv } from "./ynab.ts";
+import type { YnabEnv } from "./ynab.ts";
+import { importPlanEffect, ynabLiveLayer } from "./ynab-service.ts";
 
 type ImportMode = "prepare" | "import";
 type ImportReply = {status:number;body:unknown};
@@ -27,7 +28,7 @@ export function processImportEffect(mode:ImportMode,bytes:ArrayBuffer,env:YnabEn
       message:"No transactions have been sent to YNAB"}};
     if(plan.counts.rejected>0) return {status:422,body:{ok:false,mode:"import-blocked",...summary,imported:0,
       error:"Ambiguous movements found; no transactions sent to YNAB"}};
-    return yield* sendToYnabEffect(plan,env).pipe(
+    return yield* importPlanEffect(plan).pipe(
       Effect.map(result=>({status:200,body:{ok:true,mode:"import-completed",...summary,...result,
         imported:result.processed,
         message:"YNAB processed the batch (new or matched transactions). Review and reconcile Satispay in YNAB."}})),
@@ -41,4 +42,4 @@ export function processImportEffect(mode:ImportMode,bytes:ArrayBuffer,env:YnabEn
 }
 
 export const processImport=(mode:ImportMode,bytes:ArrayBuffer,env:YnabEnv):Promise<ImportReply>=>
-  Effect.runPromise(processImportEffect(mode,bytes,env));
+  Effect.runPromise(processImportEffect(mode,bytes,env).pipe(Effect.provide(ynabLiveLayer(env))));

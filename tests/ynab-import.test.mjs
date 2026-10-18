@@ -1,7 +1,14 @@
 import {test} from "node:test";
 import {strict as assert} from "node:assert";
 import {buildImportPlan,summarizeImportPlan} from "../src/import-plan.ts";
-import {importId,buildYnabTransactions,sendToYnab,findSatispayAccounts} from "../src/ynab.ts";
+import {Effect} from "effect";
+import {importId,buildYnabTransactions} from "../src/ynab.ts";
+import {importPlanEffect,findAccountsEffect,ynabLiveLayer} from "../src/ynab-service.ts";
+
+const runImport=(plan,env,mockFetch)=>
+  Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(ynabLiveLayer(env,mockFetch))));
+const runAccountDiscovery=(env,mockFetch)=>
+  Effect.runPromise(findAccountsEffect.pipe(Effect.provide(ynabLiveLayer(env,mockFetch))));
 
 const headers=["Data","Nome","Descrizione","Importo","Tipo","Stato","Disponibilità","Buoni Pasto","FlexBen","Disponibilità dopo la transazione","ID (Comunicalo all'Assistenza Clienti in caso di problemi)"];
 const day=new Date("2026-10-18T00:00:00.000Z");
@@ -81,7 +88,7 @@ test("writes disabled means zero YNAB requests",async()=>{
   const plan=buildImportPlan([headers,row("a",-2)],"2026-10-01");
   let requests=0;
   const mock=async()=>{requests++;throw Error("should not fetch");};
-  await assert.rejects(sendToYnab(plan,{YNAB_WRITE_ENABLED:"false"},mock),/disabled/);
+  await assert.rejects(runImport(plan,{YNAB_WRITE_ENABLED:"false"},mock),/disabled/);
   assert.equal(requests,0);
 });
 test("blocks writes on non-Satispay target account",async()=>{
@@ -91,7 +98,7 @@ test("blocks writes on non-Satispay target account",async()=>{
     if(init.method==="POST")writes++;
     return new Response(JSON.stringify({data:{account:{id:"target",name:"Revolut",on_budget:true,closed:false}}}),{status:200});
   };
-  await assert.rejects(sendToYnab(plan,{YNAB_TOKEN:"fake",YNAB_PLAN_ID:"plan",YNAB_ACCOUNT_ID:"target",YNAB_WRITE_ENABLED:"true"},mock),/Satispay/);
+  await assert.rejects(runImport(plan,{YNAB_TOKEN:"fake",YNAB_PLAN_ID:"plan",YNAB_ACCOUNT_ID:"target",YNAB_WRITE_ENABLED:"true"},mock),/Satispay/);
   assert.equal(writes,0);
 });
 test("YNAB import accepts successful batch with duplicate_import_ids",async()=>{
@@ -102,7 +109,7 @@ test("YNAB import accepts successful batch with duplicate_import_ids",async()=>{
     if(init.method==="GET")return new Response(JSON.stringify({data:{account:{id:"target",name:"Satispay",on_budget:true,closed:false}}}),{status:200});
     return new Response(JSON.stringify({data:{transaction_ids:["trans-1"],duplicate_import_ids:[]}}),{status:200});
   };
-  const result=await sendToYnab(plan,{YNAB_TOKEN:"fake",YNAB_PLAN_ID:"plan",YNAB_ACCOUNT_ID:"target",YNAB_WRITE_ENABLED:"true"},mock);
+  const result=await runImport(plan,{YNAB_TOKEN:"fake",YNAB_PLAN_ID:"plan",YNAB_ACCOUNT_ID:"target",YNAB_WRITE_ENABLED:"true"},mock);
   assert.deepEqual(result,{submitted:1,processed:1,duplicateImports:0,ynabReportedTransactionIds:1});
   assert.match(calls[1].url,/\/v1\/plans\/plan\/transactions$/);
   assert.equal(calls[1].body.transactions[0].payee_name,"Negozio A");
@@ -113,7 +120,7 @@ test("account discovery only returns accounts named Satispay",async()=>{
    ?{plans:[{id:"plan-1",name:"Budget"}]}
    :{accounts:[{id:"sat",name:"Satispay",on_budget:true,closed:false},{id:"rev",name:"Revolut",on_budget:true,closed:false}]}
  }),{status:200});
- const r=await findSatispayAccounts({YNAB_TOKEN:"test"},mock);
+ const r=await runAccountDiscovery({YNAB_TOKEN:"test"},mock);
  assert.equal(r.matches.length,1);
  assert.equal(r.matches[0].accountId,"sat");
 });
@@ -125,7 +132,7 @@ test("matched transaction IDs do not inflate processed movement count",async()=>
     // YNAB may report multiple underlying transaction IDs for a match.
     return new Response(JSON.stringify({data:{transaction_ids:["a","b","c","d"],duplicate_import_ids:[]}}),{status:201});
   };
-  const result=await sendToYnab(plan,{YNAB_TOKEN:"test",YNAB_PLAN_ID:"plan",YNAB_ACCOUNT_ID:"target",YNAB_WRITE_ENABLED:"true"},mock);
+  const result=await runImport(plan,{YNAB_TOKEN:"test",YNAB_PLAN_ID:"plan",YNAB_ACCOUNT_ID:"target",YNAB_WRITE_ENABLED:"true"},mock);
   assert.deepEqual(result,{submitted:2,processed:2,duplicateImports:0,ynabReportedTransactionIds:4});
 });
 test("repeated import IDs count as duplicates, not processed movements",async()=>{
@@ -134,7 +141,7 @@ test("repeated import IDs count as duplicates, not processed movements",async()=
     if(init.method==="GET")return new Response(JSON.stringify({data:{account:{id:"target",name:"Satispay",on_budget:true,closed:false}}}),{status:200});
     return new Response(JSON.stringify({data:{transaction_ids:[],duplicate_import_ids:["SPS:one","SPS:two"]}}),{status:201});
   };
-  const result=await sendToYnab(plan,{YNAB_TOKEN:"test",YNAB_PLAN_ID:"plan",YNAB_ACCOUNT_ID:"target",YNAB_WRITE_ENABLED:"true"},mock);
+  const result=await runImport(plan,{YNAB_TOKEN:"test",YNAB_PLAN_ID:"plan",YNAB_ACCOUNT_ID:"target",YNAB_WRITE_ENABLED:"true"},mock);
   assert.equal(result.processed,0);
   assert.equal(result.duplicateImports,2);
   assert.equal(result.ynabReportedTransactionIds,0);

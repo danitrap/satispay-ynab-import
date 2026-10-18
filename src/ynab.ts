@@ -1,4 +1,5 @@
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import type { ImportCandidate, ImportPlan } from "./import-plan.ts";
 
 export type YnabEnv = {
@@ -40,29 +41,33 @@ function requireToken(env: YnabEnv) {
 
 /** One Effect for transport, HTTP status and response decoding; errors are typed. */
 function apiEffect(path:string, token:string, method="GET", body?:unknown, fetchFn:ApiFetch=fetch) {
-  return Effect.gen(function* () {
-    const res = yield* Effect.tryPromise({
-      try: () => fetchFn("https://api.ynab.com/v1"+path, {
-        method,
-        headers: {
-          Authorization: "Bearer " + token,
-          Accept: "application/json",
-          ...(body ? {"Content-Type":"application/json"} : {})
-        },
-        ...(body ? {body: JSON.stringify(body)} : {})
-      }),
-      catch: () => new YnabError("YNAB network error. Retrying with the same import IDs is safe.")
-    });
-    if (!res.ok) return yield* Effect.fail(new YnabError("YNAB API HTTP "+res.status+". Check your plan, account and token."));
-    const parsed = yield* Effect.tryPromise({
-      try: () => res.json() as Promise<{data?:unknown}>,
-      catch: () => new YnabError("YNAB returned unexpected JSON. Check import status before repeating.")
-    });
-    if (!parsed || typeof parsed !== "object" || !("data" in parsed) || !parsed.data) {
+  const execute=Effect.gen(function* () {
+    const url="https://api.ynab.com/v1"+path;
+    const initial=(method==="POST"?HttpClientRequest.post(url):HttpClientRequest.get(url)).pipe(
+      HttpClientRequest.setHeader("Authorization","Bearer "+token),
+      HttpClientRequest.acceptJson
+    );
+    const request=body===undefined ? initial : yield* HttpClientRequest.bodyJson(initial,body).pipe(
+      Effect.mapError(()=>new YnabError("Cannot encode YNAB request"))
+    );
+    const res=yield* HttpClient.execute(request).pipe(
+      Effect.mapError(()=>new YnabError("YNAB network error. Retrying with the same import IDs is safe."))
+    );
+    if (res.status<200 || res.status>=300) {
+      return yield* Effect.fail(new YnabError("YNAB API HTTP "+res.status+". Check your plan, account and token."));
+    }
+    const parsed:unknown=yield* res.json.pipe(
+      Effect.mapError(()=>new YnabError("YNAB returned unexpected JSON. Check import status before repeating."))
+    );
+    if(!parsed || typeof parsed!=="object" || !("data" in parsed) || !parsed.data) {
       return yield* Effect.fail(new YnabError("YNAB returned unexpected JSON. Check import status before repeating."));
     }
-    return parsed.data as unknown;
+    return parsed.data;
   });
+  const transport=FetchHttpClient.layer.pipe(
+    Layer.provide(Layer.succeed(FetchHttpClient.Fetch,fetchFn))
+  );
+  return execute.pipe(Effect.provide(transport));
 }
 
 export function findSatispayAccountsEffect(env:YnabEnv, fetchFn:ApiFetch=fetch) {

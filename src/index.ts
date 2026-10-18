@@ -2,7 +2,8 @@ import { Effect } from "effect";
 import { decodeCsv, parseCsv } from "./csv.ts";
 import { inspectXlsxEffect, previewXlsxEffect } from "./spreadsheet.ts";
 import { processImportEffect } from "./import-handler.ts";
-import { findSatispayAccountsEffect, type YnabEnv } from "./ynab.ts";
+import type { YnabEnv } from "./ynab.ts";
+import { findAccountsEffect, ynabLiveLayer } from "./ynab-service.ts";
 
 type Env = { UPLOAD_TOKEN:string } & YnabEnv;
 const MAX_FILE_BYTES=4_000_000;
@@ -75,7 +76,7 @@ export function handleRequestEffect(request:Request,env:Env) {
       return json({ok:false,error:"Unauthorized"},401);
     }
     if(listAccounts) {
-      return yield* findSatispayAccountsEffect(env).pipe(
+      return yield* findAccountsEffect.pipe(
         Effect.map(accounts=>json({ok:true,...accounts})),
         Effect.catch(e=>Effect.succeed(json({ok:false,error:e.message},502)))
       );
@@ -151,6 +152,6 @@ export function handleRequestEffect(request:Request,env:Env) {
 
 export default {
   fetch(request:Request,env:Env):Promise<Response>{
-    return Effect.runPromise(handleRequestEffect(request,env));
+    return Effect.runPromise(handleRequestEffect(request,env).pipe(Effect.provide(ynabLiveLayer(env))));
   }
 };
