@@ -1,5 +1,5 @@
 import { decodeCsv, parseCsv } from "./csv.ts";
-import { inspectXlsx } from "./spreadsheet.ts";
+import { inspectXlsx, previewXlsx } from "./spreadsheet.ts";
 
 type Env = { UPLOAD_TOKEN: string };
 const MAX_FILE_BYTES = 4_000_000;
@@ -18,12 +18,13 @@ export default {
     if (request.method === "GET" && url.pathname === "/health") {
       return json({ ok: true, service: "satispay-ynab-import", mode: "inspect-only", formats: ["xlsx","csv"], upload: ["raw","multipart"] });
     }
-    if (request.method !== "POST" || url.pathname !== "/inspect") {
+    if (request.method !== "POST" || !["/inspect", "/preview"].includes(url.pathname)) {
       return json({ ok: false, error: "Not found" }, 404);
     }
     if (!env.UPLOAD_TOKEN || request.headers.get("Authorization") !== "Bearer " + env.UPLOAD_TOKEN) {
       return json({ ok: false, error: "Unauthorized" }, 401);
     }
+    const preview = url.pathname === "/preview";
     const contentType = request.headers.get("Content-Type") ?? "application/octet-stream";
     const contentLength = Number(request.headers.get("Content-Length") ?? "0");
     if (contentLength > MAX_REQUEST_BYTES) return json({ ok: false, error: "Upload too large" }, 413);
@@ -80,9 +81,11 @@ export default {
     const xlsx = bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
     if (xlsx) {
       try {
-        const inspection = await inspectXlsx(bytes.buffer as ArrayBuffer);
-        return json({ ok: true, mode: "inspect-only", format: "xlsx", fileName, ...inspection,
-          imported: 0, message: "Excel received and parsed. Nothing sent to YNAB." });
+        const inspection = preview
+          ? await previewXlsx(bytes.buffer as ArrayBuffer)
+          : await inspectXlsx(bytes.buffer as ArrayBuffer);
+        return json({ ok: true, format: "xlsx", fileName, ...inspection,
+          imported: 0, message: preview ? "Dry run only: nothing sent to YNAB." : "Excel received and parsed. Nothing sent to YNAB." });
       } catch {
         return json({ ok: false, error: "Cannot parse XLSX workbook. Check the exported Excel file." }, 422);
       }
@@ -90,6 +93,7 @@ export default {
     if (fileName.toLowerCase().endsWith(".xlsx") || contentType.toLowerCase().includes("spreadsheetml")) {
       return json({ ok: false, error: "Not a valid XLSX (ZIP signature missing)" }, 422);
     }
+    if (preview) return json({ ok: false, error: "Preview currently supports XLSX only" }, 415);
     try {
       const parsed = parseCsv(decodeCsv(bytes));
       // No CSV contents are saved, logged, or transmitted to YNAB in this starter.

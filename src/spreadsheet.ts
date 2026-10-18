@@ -1,3 +1,5 @@
+import { previewSatispay } from "./preview.ts";
+
 /** Inspection-only Satispay worksheet diagnostics. No transaction-level details leave the Worker. */
 export type SheetCell = string | number | boolean | Date | null | undefined;
 
@@ -91,4 +93,9 @@ export function summarizeSheet(rows: SheetCell[][]) {
 export async function inspectXlsx(file: ArrayBuffer) {
   const { readSheet } = await import("read-excel-file/universal");
   return summarizeSheet(await readSheet(file));
+}
+
+export async function previewXlsx(file: ArrayBuffer) {
+  const { readSheet } = await import("read-excel-file/universal");
+  return previewSatispay(await readSheet(file));
 }

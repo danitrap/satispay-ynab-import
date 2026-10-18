@@ -51,3 +51,16 @@ For XLSX set Content-Type to `application/vnd.openxmlformats-officedocument.spre
 Inspect an actual Satispay export to identify columns, dates, amounts, account transfers and stable transaction IDs. Then add YNAB mapping, a D1 deduplication ledger, explicit preview and safe idempotent imports. A transfer from Revolut to Satispay must not become a duplicated expense.
 
 Never upload raw financial exports, credentials, or access tokens to the GitHub repository.
+
+## Weekly preview without financial writes
+
+Use the same Shortcut with endpoint `/preview` instead of `/inspect`, and send the Satispay Excel as **Request Body → File**. Authentication remains the same. The JSON contains `eligible`, `skipped`, `requiresReview`, `inflowEur`, `outflowEur`, `netEur`, grouped `byType` and `byReason`. No names, transaction IDs, descriptions or line-item amounts are returned.
+
+- Uses only `Disponibilità` (not `Importo`); skips rows with no wallet movement, e.g. meal vouchers or FlexBen-only purchases.
+- Known payment type: `🏬 a un Negozio`.
+- Known incoming types: `🎖️ Punti` and `Rimborso` **when the wallet amount is positive**.
+- Unknown/new types, Fineco top-ups, missing/duplicate IDs, invalid dates and non-approved states are flagged `requiresReview` and are never imported.
+- The current prototype **cannot** determine if movements already exist in YNAB: `eligible` means *potentially importable*, not *new*.
+- No YNAB token, no D1 and no POST to YNAB yet; `imported: 0` always.
+
+Satispay users who track only wallet money should *not* count Buoni Pasto or FlexBen as YNAB expenses. Future Fineco ↔ Satispay recharges must be transfers instead of income or expenses. Validate the live preview and match it to your weekly reconciliation before turning on writes.
