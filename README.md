@@ -60,6 +60,37 @@ Il payee viene preso da `Nome`. Quando `Nome` è vuoto o contiene `-` (per esemp
 
 Il tipo, anche se sconosciuto, **non blocca più il batch**. Rimangono controlli bloccanti sui movimenti di Disponibilità: data valida, stato esatto `✅ Approvato`, ID Satispay testuale/presente/univoco nel file e importo rappresentabile in centesimi. Una riga problematica viene esclusa dalle candidate, e la presenza di righe rifiutate blocca l'intera chiamata a `/import`. Nessun automatic transfer viene creato.
 
+## Rimborsi misti e controllo dei saldi
+
+Alcuni export Satispay hanno una particolarità: per il tipo `🔄 Rimborso`, la colonna `Disponibilità` può riportare il **valore totale dell'acquisto**, anche quando l'acquisto iniziale era stato pagato in parte con Buoni Pasto. Importare quel valore come accredito del wallet sovrastimerebbe il saldo.
+
+Il Worker cerca quindi un **acquisto originale univoco** `🏬 a un Negozio` con:
+- stesso `Nome` dell'esercente (ignora maiuscole/spazi; non accetta nomi mancanti);
+- `Importo` uguale e di segno opposto;
+- data precedente al rimborso, entro 90 giorni;
+- stato `✅ Approvato`;
+- ripartizione contabile verificabile: `Disponibilità + Buoni Pasto + FlexBen = Importo`.
+
+Se trova esattamente una corrispondenza, l'importo del rimborso viene limitato alla parte originariamente pagata con **Disponibilità**. Non cambia il suo ID Satispay né l'algoritmo di generazione di `import_id`.
+
+Se l'acquisto originale manca dall'export, più acquisti sono compatibili, o la suddivisione degli importi è incoerente, il rimborso viene segnalato come `rejected`/`requiresReview`: **nessun import viene effettuato per il batch contenente il caso non risolto**. Per risolverlo, esporta anche l'intervallo contenente l'acquisto originale.
+
+I controlli delle ricariche, P2P, salvadanai, `Altro` e carte **non cambiano**: qualsiasi importo di Disponibilità diverso da zero rimane un'entrata o un'uscita ordinaria da riclassificare manualmente in YNAB.
+
+### Diagnostica dei saldi
+
+`/preview` e `/prepare` restituiscono inoltre:
+- `refundsAdjusted`: quanti rimborsi dell'intero file sono stati corretti;
+- `refundsUnresolved`: quanti rimborsi dell'intero file richiedono approfondimento;
+- `balanceCheck.status`: `ok`, `mismatch` oppure `unavailable`;
+- `balanceCheck.discrepancyMilliunits` e i totali attesi/calcolati, quando disponibili.
+
+Il controllo usa **il saldo più recente e quello più vecchio disponibili** (`Disponibilità dopo la transazione`) e confronta la differenza con la somma dei movimenti corretti fra quei due punti. Non confronta forzatamente ogni coppia di righe, perché l'ordine di registrazione di alcune transazioni con carta può generare differenze temporanee.
+
+È una **diagnostica** e non blocca da sola l'importazione: `mismatch` può anche dipendere da un export parziale, snapshot mancanti o ordine non attendibile. I rimborsi ambigui e gli importi invalidi, invece, continuano a bloccare le transazioni coinvolte nella finestra di importazione.
+
+Nel test sull'export storico di 302 righe, due rimborsi misti vengono ridotti da `19.00 → 3.00 €` e `20.23 → 4.23 €`: correzione aggregata di **32,00 €**. Dopo la correzione, la variazione dei saldi torna esattamente con la somma dei movimenti: `balanceCheck.discrepancyMilliunits = 0`.
+
 ## Matching, deduplica e periodo di import
 
 L'ID Satispay viene trasformato in un `import_id` stabile (SHA-256, massimo 36 caratteri). Il Worker invia le transazioni a YNAB con `cleared: "cleared"` e `approved: false`.

@@ -1,4 +1,5 @@
 import type { SheetCell } from "./spreadsheet.ts";
+import { analyzeLedger } from "./ledger.ts";
 
 export type ImportCandidate = {
   satispayId: string;
@@ -16,6 +17,9 @@ export type ImportPlan = {
   inflowMilliunits: number;
   outflowMilliunits: number;
   netMilliunits: number;
+  refundsAdjusted: number;
+  refundsUnresolved: number;
+  balanceCheck: ReturnType<typeof analyzeLedger>["balanceCheck"];
 };
 
 function text(v: SheetCell): string {
@@ -50,6 +54,7 @@ export function buildImportPlan(rows: SheetCell[][], fromDate:string):ImportPlan
   const idIndex=names.findIndex(n=>n==="ID" || n.startsWith("ID ("));
   if (idIndex<0) throw new Error("Missing Satispay transaction ID column");
   const data=rows.slice(1).filter(r=>r.some(cell=>text(cell)!==""));
+  const ledger=analyzeLedger([rows[0],...data]);
   const counts={exported:data.length,olderThanStart:0,withoutAvailability:0,rejected:0,inScope:0};
   const issues: Record<string,number>={};
   const candidates:ImportCandidate[]=[];
@@ -59,13 +64,15 @@ export function buildImportPlan(rows: SheetCell[][], fromDate:string):ImportPlan
     if (id) ids.set(id,(ids.get(id)??0)+1);
   }
   const issue=(reason:string)=>{counts.rejected++;issues[reason]=(issues[reason]??0)+1;};
-  for (const row of data) {
+  for (const [rowIndex,row] of data.entries()) {
     const date=parseDate(row[get("Data")]);
     if (date && date<fromDate) {counts.olderThanStart++;continue;}
     const avail=row[get("Disponibilità")];
     if (avail===undefined || avail===null || text(avail)==="") {counts.withoutAvailability++;continue;}
     if (!date) {issue("invalid_date");continue;}
-    const amount=asMilliunits(avail);
+    const resolution=ledger.resolved[rowIndex];
+    if(resolution?.issue){issue(resolution.issue);continue;}
+    const amount=resolution?.amountCents===null || resolution===undefined ? null : resolution.amountCents*10;
     if (amount===null) {issue("invalid_availability_amount");continue;}
     if (amount===0) {counts.withoutAvailability++;continue;}
     const idCell=row[idIndex];
@@ -91,7 +98,11 @@ export function buildImportPlan(rows: SheetCell[][], fromDate:string):ImportPlan
     if(candidate.amountMilliunits>0)inflowMilliunits+=candidate.amountMilliunits;
     else outflowMilliunits+=-candidate.amountMilliunits;
   }
-  return {candidates,counts,issues,fromDate,inflowMilliunits,outflowMilliunits,netMilliunits:inflowMilliunits-outflowMilliunits};
+  return {candidates,counts,issues,fromDate,inflowMilliunits,outflowMilliunits,
+    netMilliunits:inflowMilliunits-outflowMilliunits,
+    refundsAdjusted:ledger.refundsAdjusted,
+    refundsUnresolved:ledger.refundsUnresolved,
+    balanceCheck:ledger.balanceCheck};
 }
 export function summarizeImportPlan(plan:ImportPlan) {
   return {
@@ -101,6 +112,9 @@ export function summarizeImportPlan(plan:ImportPlan) {
     inflowMilliunits:plan.inflowMilliunits,
     outflowMilliunits:plan.outflowMilliunits,
     netMilliunits:plan.netMilliunits,
+    refundsAdjusted:plan.refundsAdjusted,
+    refundsUnresolved:plan.refundsUnresolved,
+    balanceCheck:plan.balanceCheck,
     // No payees, memo, IDs or transaction-level amounts in API responses.
     eligible:plan.candidates.length
   };

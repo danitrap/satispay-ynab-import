@@ -1,4 +1,5 @@
 /** A conservative, side-effect-free proposed YNAB import plan for Satispay. */
+import { analyzeLedger } from "./ledger.ts";
 export type Cell = string | number | boolean | Date | null | undefined;
 export type PreviewRow = {
   decision: "include" | "skip" | "review";
@@ -31,7 +32,9 @@ function classify(type: string, amountCents: number, status: string, dateValid: 
 
 export function previewSatispay(rows: Cell[][]) {
   if (!rows.length) throw new Error("Empty worksheet");
-  const [headers, ...data] = rows;
+  const [headers, ...unfiltered] = rows;
+  const data=unfiltered.filter(row=>row.some(value=>cellText(value)!==""));
+  const ledger=analyzeLedger([headers,...data]);
   const fields = headers.map(cellText);
   const find = (name: string) => fields.indexOf(name);
   const required = ["Data", "Importo", "Disponibilità", "Tipo", "Stato"];
@@ -48,19 +51,20 @@ export function previewSatispay(rows: Cell[][]) {
   let outflowCents = 0;
   let inflowCents = 0;
   const byReason = new Map<string,number>();
-  for (const row of data) {
-    if (row.every(value => cellText(value) === "")) continue;
+  for (const [index,row] of data.entries()) {
     const type=cellText(row[find("Tipo")]) || "(vuoto)";
     const raw= row[find("Disponibilità")];
     const rawText=cellText(raw);
-    const cents=asCents(raw);
+    const resolution=ledger.resolved[index];
+    const amountCents=resolution?.amountCents ?? null;
     let result: PreviewRow;
     if (rawText === "") result={decision:"skip",reason:"no_availability_movement",type};
-    else if (cents === null) result={decision:"review",reason:"invalid_availability_amount",type};
-    else if (cents === 0) result={decision:"skip",reason:"zero_availability_movement",type};
+    else if (resolution?.issue) result={decision:"review",reason:resolution.issue,type};
+    else if (amountCents === null) result={decision:"review",reason:"invalid_availability_amount",type};
+    else if (amountCents === 0) result={decision:"skip",reason:"zero_availability_movement",type};
     else {
       const id=cellText(row[idIndex]);
-      result=classify(type,cents,cellText(row[find("Stato")]),isValidDate(row[find("Data")]),id !== "" && typeof row[idIndex] === "string" && idCounts.get(id) === 1);
+      result=classify(type,amountCents,cellText(row[find("Stato")]),isValidDate(row[find("Data")]),id !== "" && typeof row[idIndex] === "string" && idCounts.get(id) === 1);
     }
     all.push(result);
     const bucket=byType.get(type) ?? {include:0,skip:0,review:0};
@@ -68,8 +72,8 @@ export function previewSatispay(rows: Cell[][]) {
     byType.set(type,bucket);
     byReason.set(result.reason,(byReason.get(result.reason) ?? 0)+1);
     if (result.decision === "include") {
-      if (cents! < 0) outflowCents += -cents!;
-      else inflowCents += cents!;
+      if (amountCents! < 0) outflowCents += -amountCents!;
+      else inflowCents += amountCents!;
     }
   }
   const count=(decision:PreviewRow["decision"])=>all.filter(x=>x.decision===decision).length;
@@ -93,6 +97,9 @@ export function previewSatispay(rows: Cell[][]) {
     netMilliunits:(inflowCents-outflowCents)*10,
     byType:Object.fromEntries([...byType.entries()]),
     byReason:Object.fromEntries([...byReason.entries()]),
+    refundsAdjusted:ledger.refundsAdjusted,
+    refundsUnresolved:ledger.refundsUnresolved,
+    balanceCheck:ledger.balanceCheck,
     imported:0,
     message:"Dry run only. No transactions sent to YNAB. Transfers can be adjusted manually in YNAB."
   };
