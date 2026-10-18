@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { previewSatispay } from "./preview.ts";
 
 /** Inspection-only Satispay worksheet diagnostics. No transaction-level details leave the Worker. */
@@ -90,12 +91,32 @@ export function summarizeSheet(rows: SheetCell[][]) {
     }
   };
 }
-export async function inspectXlsx(file: ArrayBuffer) {
-  const { readSheet } = await import("read-excel-file/universal");
-  return summarizeSheet(await readSheet(file) as unknown as SheetCell[][]);
+export class WorkbookError extends Error {
+  readonly _tag="WorkbookError";
+  constructor(message:string) { super(message); this.name="WorkbookError"; }
 }
 
-export async function previewXlsx(file: ArrayBuffer) {
-  const { readSheet } = await import("read-excel-file/universal");
-  return previewSatispay(await readSheet(file) as unknown as SheetCell[][]);
-}
+/** Untrusted xlsx decoding happens at the I/O boundary, errors remain typed. */
+export const readSheetEffect=(file:ArrayBuffer)=>Effect.tryPromise({
+  try: async ()=>{
+    const { readSheet }=await import("read-excel-file/universal");
+    return await readSheet(file) as unknown as SheetCell[][];
+  },
+  catch:()=>new WorkbookError("Cannot parse XLSX workbook. Check the exported Excel file.")
+});
+export const inspectXlsxEffect=(file:ArrayBuffer)=>readSheetEffect(file).pipe(
+  Effect.flatMap(rows=>Effect.try({
+    try:()=>summarizeSheet(rows),
+    catch:()=>new WorkbookError("Cannot parse XLSX workbook. Check the exported Excel file.")
+  }))
+);
+export const previewXlsxEffect=(file:ArrayBuffer)=>readSheetEffect(file).pipe(
+  Effect.flatMap(rows=>Effect.try({
+    try:()=>previewSatispay(rows),
+    catch:()=>new WorkbookError("Cannot parse XLSX workbook. Check the exported Excel file.")
+  }))
+);
+
+// Promise adapters for clients outside the Effect runtime.
+export const inspectXlsx=(file:ArrayBuffer)=>Effect.runPromise(inspectXlsxEffect(file));
+export const previewXlsx=(file:ArrayBuffer)=>Effect.runPromise(previewXlsxEffect(file));

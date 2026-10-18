@@ -16,3 +16,13 @@ YNAB_IMPORT_FROM = "2026-10-11"
 
 # Secrets must ONLY be configured in Cloudflare, never in this file:
 # UPLOAD_TOKEN and YNAB_TOKEN
+
+# Worker Previews are isolated from production vars and secrets.
+# Keep write operations disabled and never point Previews at actual YNAB accounts.
+# /health needs no credentials; authenticated smoke tests require a separate
+# Preview-only UPLOAD_TOKEN secret configured in Cloudflare.
+[previews.vars]
+YNAB_WRITE_ENABLED = "false"
+YNAB_PLAN_ID = "00000000-0000-0000-0000-000000000000"
+YNAB_ACCOUNT_ID = "00000000-0000-0000-0000-000000000000"
+YNAB_IMPORT_FROM = "2026-10-11"
