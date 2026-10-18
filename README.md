@@ -219,3 +219,20 @@ Run `npm test`, `npm run check`, and `npm run check:bundle` before considering m
 - Effect-focused regression tests exercise malformed API JSON, account safety, matched transactions and hashing order using injected `fetch` implementations (no real YNAB calls).
 - Effect v4 schemas require TypeScript 5.9+, now reflected in `package.json`.
 - Pure Satispay ledger calculations, inclusion rules and mixed-refund logic stay untouched.
+
+## Effect v4 services and Layer testing (PR #2)
+
+The YNAB integration now exposes a typed `YnabService` through `Context.Service`.
+`ynabHttpLayer` constructs it from an injected Effect `HttpClient`, and
+`ynabLiveLayer` supplies the fetch-backed transport for each Cloudflare request.
+Production code resolves the service from Context, without passing YNAB fetch callbacks.
+
+Unit tests use `ynabTestLayer` to replace the service without HTTP; integration
+tests use `ynabLiveLayer` with a fake fetch transport and verify that invalid
+account responses or disabled writes never issue a POST. Import IDs, wallet
+classification, refund adjustment, account guards, explicit confirmation, and
+the October 11 import cutoff are unchanged. The HTTP client never automatically
+retries imports or treats a malformed response as an unambiguous failure.
+
+The Effect HTTP module is currently unstable, so changes to its API will be
+caught by TypeScript and the Cloudflare Wrangler bundle check.

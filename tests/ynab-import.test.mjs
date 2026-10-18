@@ -2,7 +2,7 @@ import {test} from "node:test";
 import {strict as assert} from "node:assert";
 import {buildImportPlan,summarizeImportPlan} from "../src/import-plan.ts";
 import {Effect} from "effect";
-import {importId,buildYnabTransactions} from "../src/ynab.ts";
+import {importIdEffect,buildYnabTransactionsEffect} from "../src/ynab.ts";
 import {importPlanEffect,findAccountsEffect,ynabLiveLayer} from "../src/ynab-service.ts";
 
 const runImport=(plan,env,mockFetch)=>
@@ -69,15 +69,15 @@ test("any Disponibilità inflow imports as ordinary inflow including bank, P2P a
 });
 
 test("import IDs are deterministic, privacy preserving and at most 36 chars",async()=>{
-  const a=await importId("external-private-id-123");
+  const a=await Effect.runPromise(importIdEffect("external-private-id-123"));
   assert.equal(a.length,36);
-  assert.equal(a,await importId("external-private-id-123"));
-  assert.notEqual(a,await importId("external-private-id-124"));
+  assert.equal(a,await Effect.runPromise(importIdEffect("external-private-id-123")));
+  assert.notEqual(a,await Effect.runPromise(importIdEffect("external-private-id-124")));
   assert.equal(a.includes("external"),false);
 });
 test("YNAB payload uses imported cleared unapproved transactions",async()=>{
   const plan=buildImportPlan([headers,row("a",-12.34)],"2026-10-01");
-  const payload=await buildYnabTransactions(plan.candidates,"account-uuid");
+  const payload=await Effect.runPromise(buildYnabTransactionsEffect(plan.candidates,"account-uuid"));
   assert.equal(payload[0].amount,-12340);
   assert.equal(payload[0].approved,false);
   assert.equal(payload[0].cleared,"cleared");
