@@ -1,238 +1,372 @@
 # Satispay → YNAB
 
-Importazione settimanale **on-demand** delle transazioni del wallet Satispay in YNAB, usando un export Excel, Apple Shortcuts e un Cloudflare Worker.
+**Import Satispay transactions into YNAB. Self-hosted, reviewable, and built with Cloudflare Workers + Effect v4.**
 
-**Stato: funzionante, testato end-to-end il 18 ottobre 2026.** Il primo invio reale (5 movimenti) è stato abbinato correttamente alle transazioni già presenti in YNAB, senza duplicati visibili. Il processo non scarica automaticamente i movimenti da Satispay: devi esportare e condividere il file.
+![TypeScript](https://img.shields.io/badge/TypeScript-5.9%2B-3178C6?logo=typescript&logoColor=white)
+![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)
+![Effect](https://img.shields.io/badge/Effect-v4-6750A4)
 
-## Come funziona
+Turn a manually exported Satispay Excel workbook into YNAB transactions using a small HTTP API. Inspect an export, preview the impact on your budget, and explicitly confirm an import. Use it from [Apple Shortcuts](https://support.apple.com/guide/shortcuts/welcome/ios), a terminal, or any HTTP client.
 
-```text
-Satispay (iPhone) → Export Excel .xlsx → Condividi → Apple Shortcut
-    → Cloudflare Worker /import → Seleziona i movimenti di Disponibilità
-    → YNAB API → Matching e deduplica → Approvazione e riconciliazione
-```
+No scraping, scheduled access to your Satispay account, database, or continuously running server.
 
-Nessun VPS, nessun database D1 e nessuno scraping. Gli ID stabili forniti dall'export Satispay consentono di ottenere `import_id` deterministici per YNAB.
+> [!IMPORTANT]
+> This is an **unofficial, community-maintained integration** and is not affiliated with Satispay or YNAB. You must export your transactions yourself. Always review imported transactions in YNAB.
 
-## Utilizzo settimanale
+## Highlights
 
-1. Esporta le transazioni Satispay come **Excel (.xlsx)**; puoi sovrapporre i periodi fra una settimana e l'altra.
-2. Condividi il file dall'iPhone usando il Comando Rapido **Import Satispay**. Se non compare nel foglio di condivisione, salva l'Excel nell'app File e condividilo da lì.
-3. Lo Shortcut invia il file al Worker e mostra il risultato (vedi sotto).
-4. Apri il conto Satispay su YNAB, verifica le transazioni abbinate/nuove, approva quelle necessarie e riconcilia il saldo.
+- **Wallet-first accounting:** import the cash portion of a movement, regardless of its Satispay transaction type.
+- **Benefit-aware:** exclude meal-voucher and other benefit balances from your cash-wallet account.
+- **Mixed-refund handling:** match merchant refunds against their original purchases and avoid overstating the cash portion.
+- **Safe previews:** inspect file structure, summarize all movements, or simulate your next import before writing anything.
+- **Deterministic deduplication:** derive YNAB import IDs from stable Satispay transaction identifiers.
+- **Balance diagnostics:** compare movements with the export's available balance snapshots.
+- **Composable architecture:** Effect v4, typed failures, Schema validation, and Context/Layer-based HTTP services.
+- **Deploy anywhere Workers runs:** a single Cloudflare Worker, without an application database.
 
-### Impostazione Apple Shortcuts
+## How it works
 
-Configura un comando che riceve file tramite **Mostra nel foglio di condivisione**. Aggiungi **Ottieni contenuti URL** con:
+~~~text
+Satispay .xlsx export
+        │
+        ▼
+ Apple Shortcut / curl
+        │
+        ▼
+  Cloudflare Worker ─────────────────────────────┐
+        │                                        │
+    Parse workbook                               │
+        │                                        │
+    Validate rows                                │
+        │                                        │
+    Resolve mixed refunds                        │
+        │                                        │
+    Build import plan                            │
+        │                                        │
+        ├── /preview ──► Read-only summary       │
+        ├── /prepare ──► Cutoff-aware dry run    │
+        │                                        │
+        └── /import ──► YNAB API                 │
+                          │                      │
+                     Deduplicate & match         │
+                          │                      │
+                     Review in YNAB ◄────────────┘
+~~~
 
-| Campo | Valore |
-| --- | --- |
-| URL | `https://satispay-ynab-import.daniele-trapani.workers.dev/import` |
-| Metodo | `POST` |
-| Header `Authorization` | `Bearer <UPLOAD_TOKEN>` |
-| Header `X-Confirm-Import` | `yes` |
-| Corpo richiesta | **File → Input comando rapido** |
+Uploads are processed in memory. The Worker does not store transaction exports, and YNAB handles deduplication for previously imported IDs.
 
-Non scegliere il formato JSON o Modulo e non impostare manualmente un header `multipart/form-data`. Per sicurezza, **non condividere lo Shortcut contenente il token**.
+## Quick start: from fork to first preview
 
-**Dopo la chiamata HTTP:** leggi il valore `ok` dalla risposta con **Ottieni valore dizionario** e usa **Se**:
-- Se `ok` è vero, estrai `processed` e `duplicateImports`; mostra `✅ Satispay sincronizzato — elaborati: [processed], import ID già presenti: [duplicateImports]`. Facoltativo: **Apri app → YNAB**.
-- Altrimenti, estrai `error` e mostra un avviso `❌ Importazione non riuscita: [error]`.
+### Requirements
 
-`processed` **non equivale a nuove righe create in YNAB**: include anche movimenti abbinati a transazioni già inserite manualmente.
+- Node.js **22+** and npm
+- A [Cloudflare account](https://dash.cloudflare.com/)
+- A [YNAB API personal access token](https://api.ynab.com/)
+- A Satispay **Excel (`.xlsx`)** transaction export
+- An active, **on-budget** YNAB account whose name contains **Satispay**
 
-## Regole contabili: esclusivamente Disponibilità
+### 1. Fork and install
 
-**Il segno del campo `Disponibilità` determina il movimento; il campo `Tipo` NON decide se importarlo.** È una scelta intenzionale: qualsiasi somma che esce dal wallet arriva su YNAB come uscita ordinaria, senza creare automaticamente trasferimenti fra conti. Tutti gli aggiustamenti (Fineco, salvadanai, altri conti) si fanno manualmente in YNAB dopo l'import.
+Fork this repository on GitHub, then clone **your fork**:
 
-| Satispay | Come viene registrato in YNAB |
-| --- | --- |
-| `Disponibilità` negativa | **Uscita ordinaria**, per qualunque tipo: negozio, carta, P2P, risparmi, investimenti, `Altro`, tipo mai visto |
-| `Disponibilità` positiva | **Entrata ordinaria**, incluse ricariche `🏦 Dalla Banca`, bonifici, denaro ricevuto, rimborsi e Punti |
-| `Disponibilità` vuota o zero | Ignorata: non è stato movimentato il wallet |
-| Spesa mista wallet + Buoni Pasto/FlexBen | Importata **soltanto la quota `Disponibilità`** |
-| Spesa interamente con Buoni Pasto/FlexBen | Ignorata |
-| `🎖️ Punti` con accredito | Entrata con payee `Satispay Cashback` |
-
-Il payee viene preso da `Nome`. Quando `Nome` è vuoto o contiene `-` (per esempio nei movimenti `Altro`), il Worker usa `Satispay — <Tipo>` come descrizione riconoscibile, così puoi riclassificarlo comodamente.
-
-**Esempio:** una ricarica Fineco → Satispay di 100 € viene inizialmente importata sul conto Satispay come **entrata di 100 €**, non come transfer. Se Fineco è già tracciato in YNAB, dovrai convertirla tu in trasferimento per non contare due volte il movimento e per non gonfiare il reddito. Vale lo stesso per uscite verso salvadanai o investimenti: correggerai il payee in YNAB quando opportuno.
-
-Il tipo, anche se sconosciuto, **non blocca più il batch**. Rimangono controlli bloccanti sui movimenti di Disponibilità: data valida, stato esatto `✅ Approvato`, ID Satispay testuale/presente/univoco nel file e importo rappresentabile in centesimi. Una riga problematica viene esclusa dalle candidate, e la presenza di righe rifiutate blocca l'intera chiamata a `/import`. Nessun automatic transfer viene creato.
-
-## Rimborsi misti e controllo dei saldi
-
-Alcuni export Satispay hanno una particolarità: per il tipo `🔄 Rimborso`, la colonna `Disponibilità` può riportare il **valore totale dell'acquisto**, anche quando l'acquisto iniziale era stato pagato in parte con Buoni Pasto. Importare quel valore come accredito del wallet sovrastimerebbe il saldo.
-
-Il Worker cerca quindi un **acquisto originale univoco** `🏬 a un Negozio` con:
-- stesso `Nome` dell'esercente (ignora maiuscole/spazi; non accetta nomi mancanti);
-- `Importo` uguale e di segno opposto;
-- data precedente al rimborso, entro 90 giorni;
-- stato `✅ Approvato`;
-- ripartizione contabile verificabile: `Disponibilità + Buoni Pasto + FlexBen = Importo`.
-
-Se trova esattamente una corrispondenza, l'importo del rimborso viene limitato alla parte originariamente pagata con **Disponibilità**. Non cambia il suo ID Satispay né l'algoritmo di generazione di `import_id`.
-
-Se l'acquisto originale manca dall'export, più acquisti sono compatibili, o la suddivisione degli importi è incoerente, il rimborso viene segnalato come `rejected`/`requiresReview`: **nessun import viene effettuato per il batch contenente il caso non risolto**. Per risolverlo, esporta anche l'intervallo contenente l'acquisto originale.
-
-I controlli delle ricariche, P2P, salvadanai, `Altro` e carte **non cambiano**: qualsiasi importo di Disponibilità diverso da zero rimane un'entrata o un'uscita ordinaria da riclassificare manualmente in YNAB.
-
-### Diagnostica dei saldi
-
-`/preview` e `/prepare` restituiscono inoltre:
-- `refundsAdjusted`: quanti rimborsi dell'intero file sono stati corretti;
-- `refundsUnresolved`: quanti rimborsi dell'intero file richiedono approfondimento;
-- `balanceCheck.status`: `ok`, `mismatch` oppure `unavailable`;
-- `balanceCheck.discrepancyMilliunits` e i totali attesi/calcolati, quando disponibili.
-
-Il controllo usa **il saldo più recente e quello più vecchio disponibili** (`Disponibilità dopo la transazione`) e confronta la differenza con la somma dei movimenti corretti fra quei due punti. Non confronta forzatamente ogni coppia di righe, perché l'ordine di registrazione di alcune transazioni con carta può generare differenze temporanee.
-
-È una **diagnostica** e non blocca da sola l'importazione: `mismatch` può anche dipendere da un export parziale, snapshot mancanti o ordine non attendibile. I rimborsi ambigui e gli importi invalidi, invece, continuano a bloccare le transazioni coinvolte nella finestra di importazione.
-
-Nel test sull'export storico di 302 righe, due rimborsi misti vengono ridotti da `19.00 → 3.00 €` e `20.23 → 4.23 €`: correzione aggregata di **32,00 €**. Dopo la correzione, la variazione dei saldi torna esattamente con la somma dei movimenti: `balanceCheck.discrepancyMilliunits = 0`.
-
-## Matching, deduplica e periodo di import
-
-L'ID Satispay viene trasformato in un `import_id` stabile (SHA-256, massimo 36 caratteri). Il Worker invia le transazioni a YNAB con `cleared: "cleared"` e `approved: false`.
-
-YNAB può abbinare un movimento importato a uno già inserito **manualmente**, se corrispondono conto, importo e data entro la finestra prevista da YNAB. Se lo stesso `import_id` è già stato importato, YNAB lo riconosce come duplicato. **Non è garantito il matching tra due importazioni differenti** che usano ID diversi.
-
-`YNAB_IMPORT_FROM` è una soglia **inclusiva**: al momento è impostata a `2026-10-11`. Puoi esportare file contenenti transazioni anteriori; verranno filtrate. Questa soglia non si aggiorna ogni settimana: è un confine fisso scelto per il primo import. Non spostarla all'indietro senza valutare eventuali movimenti storici già importati.
-
-La soluzione è progettata per batch di massimo **100 movimenti candidati**. Non deduce se un movimento già inserito in YNAB verrà abbinato: l'esito si controlla nel conto YNAB.
-
-## API del Worker
-
-Base URL: `https://satispay-ynab-import.daniele-trapani.workers.dev`
-
-| Metodo e percorso | Funzione | Scrive in YNAB? |
-| --- | --- | --- |
-| `GET /health` | Stato e percorsi disponibili | No |
-| `GET /ynab/accounts` | Ricerca degli account contenenti “Satispay” nel nome | No |
-| `POST /inspect` | Colonne Excel/CSV, numero righe e statistiche aggregate | No |
-| `POST /preview` | Simulazione aggregata dei movimenti Excel, senza soglia iniziale | No |
-| `POST /prepare` | Dry-run dell'Excel con filtro `YNAB_IMPORT_FROM` e classificazione rigorosa | No |
-| `POST /import` | Importa le transazioni candidate usando YNAB API | **Sì** |
-
-Tutte le rotte tranne `GET /health` richiedono `Authorization: Bearer <UPLOAD_TOKEN>`. `POST /import` richiede inoltre `X-Confirm-Import: yes`, `YNAB_WRITE_ENABLED = "true"` e una destinazione YNAB valida.
-
-Gli upload per `/preview`, `/prepare` e `/import` richiedono **Excel .xlsx**. `/inspect` accetta anche CSV. Lo storico `.xls` non è supportato. Il Worker supporta file binario raw (ideale per Shortcuts) oppure multipart con campo `file`. Limite file: **4 MB**; limite richiesta: **4,5 MB**.
-
-### Campi importanti nella risposta di import
-
-| Campo | Significato |
-| --- | --- |
-| `eligible` | Movimenti validi selezionati dal file prima dell'invio |
-| `submitted` | Movimenti inviati all'API YNAB |
-| `processed` | Movimenti inviati meno `duplicateImports`; possono essere nuovi **oppure abbinati** |
-| `imported` | Alias storico di `processed`, non il numero di nuove righe |
-| `duplicateImports` | Import ID già presenti in YNAB |
-| `ynabReportedTransactionIds` | Conteggio degli ID restituiti da YNAB; può superare `submitted` per il matching |
-| `olderThanStart` | Righe escluse perché anteriori alla data configurata |
-| `withoutAvailability` | Righe prive di movimento del wallet |
-| `rejected` e `issues` | Errori di classificazione che impediscono il batch |
-| `inflowMilliunits`, `outflowMilliunits`, `netMilliunits` | Importi aggregati in milliunits (1 € = 1.000 milliunits) |
-
-L'API non indica con certezza quante nuove righe siano state create rispetto a quelle abbinate. Nel primo test reale, **5 movimenti inviati produssero 10 ID nella risposta**, ma YNAB li abbinò correttamente e non mostrò duplicati.
-
-## Deploy e configurazione
-
-Il Worker è collegato a GitHub, branch `main`. Per il deploy da Cloudflare:
-
-- **Build command:** vuoto (Wrangler compila TypeScript).
-- **Deploy command:** `npx wrangler deploy`.
-- **Root directory:** `/`.
-
-Le variabili non sensibili sono versionate in `wrangler.toml`:
-
-```toml
-[vars]
-YNAB_WRITE_ENABLED = "true"
-YNAB_PLAN_ID = "774d71aa-9e22-4991-a4cd-1e37aecda617"
-YNAB_ACCOUNT_ID = "231101d1-9443-4f7e-a2ca-692199fc3b22"
-YNAB_IMPORT_FROM = "2026-10-11"
-```
-
-L'account di destinazione è **Satispay** (on-budget) nel piano **Daniele**. Gli account **Stock Options Satispay** e **Satispay Salvadanaio Remunerato** non sono destinazioni di questo import.
-
-**Secret configurati esclusivamente in Cloudflare Workers → Settings → Variables and Secrets:**
-- `UPLOAD_TOKEN`: protegge gli endpoint HTTP; è usato dallo Shortcut.
-- `YNAB_TOKEN`: Personal Access Token per l'API YNAB.
-
-Non inserire mai token in `wrangler.toml`, README, commit, log o screenshot. I valori di `[vars]` versionati possono sovrascrivere impostazioni omonime effettuate nel dashboard ai deploy successivi.
-
-### Sviluppo locale e test
-
-Richiede Node.js 22+.
-
-```sh
+~~~bash
+git clone https://github.com/<your-user>/satispay-ynab-import.git
+cd satispay-ynab-import
 npm install
-npm test
-npm run check
+~~~
+
+### 2. Set up your own Worker
+
+Copy the sanitized configuration example:
+
+~~~bash
+cp wrangler.example.toml wrangler.toml
+~~~
+
+Update `wrangler.toml` for **your** installation:
+
+~~~toml
+name = "my-satispay-ynab-import"
+
+[vars]
+YNAB_WRITE_ENABLED = "false"
+YNAB_PLAN_ID = "<your-plan-id>"
+YNAB_ACCOUNT_ID = "<your-satispay-account-id>"
+YNAB_IMPORT_FROM = "2026-01-01"
+~~~
+
+The date is only an example: set `YNAB_IMPORT_FROM` to the **first date you intend to import** (inclusive). Avoid importing history that is already reconciled in YNAB. Leave writes disabled until you've checked a dry run.
+
+> [!WARNING]
+> A fork may inherit the original repository's existing `wrangler.toml`, including deployment-specific settings. **Replace it with the example before deploying**. Also choose a unique Worker `name`. Never assume the values in somebody else's configuration are appropriate for your budget.
+
+| Variable | What it does |
+| --- | --- |
+| `YNAB_PLAN_ID` | YNAB plan (budget) to write to |
+| `YNAB_ACCOUNT_ID` | Destination Satispay account in that plan |
+| `YNAB_IMPORT_FROM` | Inclusive `YYYY-MM-DD` cutoff for the import plan |
+| `YNAB_WRITE_ENABLED` | Explicit safety switch: `false` until you are ready |
+| `UPLOAD_TOKEN` | Secret authorizing access to the Worker |
+| `YNAB_TOKEN` | Secret YNAB API token |
+
+For local testing, copy the secrets template and fill in your own values:
+
+~~~bash
+cp .dev.vars.example .dev.vars
 npm run dev
-```
+~~~
 
-Per usare il Worker in locale, crea `.dev.vars` con i Secret di sviluppo (file escluso da Git). È presente una GitHub Action che esegue `npm test` e `npm run check` sui push a `main`.
+The `.dev.vars` file is ignored by Git. For a deployed Worker, set secrets with:
 
-## Sicurezza e limiti noti
+~~~bash
+npx wrangler secret put UPLOAD_TOKEN
+npx wrangler secret put YNAB_TOKEN
+~~~
 
-- Il Worker verifica che l'account YNAB di destinazione sia aperto, on-budget e abbia un nome contenente “Satispay”.
-- I batch con date, ID, stato o importi non validi vengono bloccati completamente prima di scrivere. Un tipo Satispay sconosciuto è ammesso.
-- Nessun export viene salvato: il file viene letto e processato in memoria. Le risposte non includono ID Satispay, nomi dei beneficiari, descrizioni o importi delle singole transazioni.
-- Ogni import è **on-demand** e richiede un file Excel; non esiste accesso automatico all'account consumer Satispay.
-- Non inviare export finanziari reali al repository GitHub. Le ricariche Fineco, gli spostamenti verso salvadanai e gli altri movimenti sono importati come entrate/uscite ordinarie, senza transfer automatici; riclassificali manualmente in YNAB.
-- Se YNAB non trova un abbinamento, può creare un movimento nuovo che dovrai controllare prima della riconciliazione. Verifica soprattutto le ricariche e i movimenti fra conti propri.
+`UPLOAD_TOKEN` should be an independently generated, long random string, **not** your YNAB token.
 
-## Test end-to-end
+### 3. Find your YNAB account IDs
 
-**18 ottobre 2026:** export con 23 righe, soglia 11/10/2026, 5 movimenti candidati, 16 anteriori alla soglia e 2 senza variazione di Disponibilità. Il batch inviato a YNAB aveva uscite da 30,40 €, entrate da 3,39 € e netto da −27,01 €. La verifica nell'app YNAB ha confermato matching corretto e **zero duplicati visibili**.
+Start the Worker locally with `npm run dev`, or deploy it with `npm run deploy`. Once `YNAB_TOKEN` and `UPLOAD_TOKEN` are configured, use:
 
-Il successo di questo test non garantisce il matching di tutti i movimenti futuri: continua a controllare YNAB dopo ogni import.
+~~~bash
+curl -H "Authorization: Bearer <your-upload-token>" \
+  "http://localhost:8787/ynab/accounts"
+~~~
 
-### Evoluzione del mapping — 18 ottobre 2026
+The endpoint returns accessible, active YNAB accounts containing "Satispay" in their name, with their plan and account IDs. Copy the correct IDs into your `wrangler.toml` before importing.
 
-L'esame dell'export storico Satispay (302 righe) ha mostrato ricariche bancarie, trasferimenti P2P, pagamenti con carta, movimenti verso salvadanai/investimenti e righe `Altro`. Su richiesta dell'utente il Worker è stato semplificato: **tutti i movimenti di Disponibilità con segno negativo diventano uscite, quelli positivi entrate; nessuna classificazione a transfer**. L'approvazione, la riclassificazione delle ricariche/trasferimenti e la riconciliazione restano manuali in YNAB. Gli `import_id` non sono stati modificati.
+To deploy:
 
-## Effect v4 architecture (proposed migration)
+~~~bash
+npm run deploy
+~~~
 
-This branch uses the stable `effect@^4.0.2` runtime for side effects and orchestration, while keeping accounting calculations pure and deterministic.
+For Cloudflare Git-connected deployments, use **`npx wrangler deploy`** as the deploy command. Wrangler handles the TypeScript bundle; there is no separate build output directory to configure.
 
-- **HTTP adapter** (`src/index.ts`): one `Effect.runPromise` at the Cloudflare Worker request boundary. Upload streaming, multipart parsing, CSV parsing and route handling are composable effects with typed failures.
-- **Workbook service** (`src/spreadsheet.ts`): `readSheetEffect` captures dynamic XLSX decoding failures without leaking data.
-- **Import pipeline** (`src/import-handler.ts`): `readSheetEffect → buildImportPlan → sendToYnabEffect`, or dry-run without writes. Business failures preserve the current JSON response shapes and HTTP status codes.
-- **YNAB client** (`src/ynab.ts`): typed `YnabError` failures for HTTP/network/decoding/guardrails and effectful SHA-256 import IDs. `fetchFn` stays injectable for tests. Promise-compatible exports remain for the existing tests.
-- **Pure domain** (`src/csv.ts`, `src/preview.ts`, `src/import-plan.ts`, `src/ledger.ts`): no Effect wrappers around basic math. Their deterministic computation is integrated into Effect via the calling pipeline.
-- The import ID prefix `SPS:`, SHA-256 input namespace and truncation, date cutoff, benefit allocation, mixed-refund logic, and all YNAB account safety guards are unchanged.
+### 4. Preview an export
 
-### Cloudflare Worker Preview deployment
+Use your local URL (`http://localhost:8787`) or a deployed Worker:
 
-The PR branch includes an isolated `[previews.vars]` section, required when the Cloudflare deployment command is `npx wrangler preview`. It intentionally sets `YNAB_WRITE_ENABLED = "false"` and uses placeholder YNAB plan/account UUIDs, so this preview **must not send transactions to a real YNAB plan**. Production `[vars]` are unchanged. Never copy production tokens into preview credentials.
+~~~bash
+export WORKER_URL="https://<your-worker>.workers.dev"
+export UPLOAD_TOKEN="<your-upload-token>"
 
-You can smoke-test the unauthenticated `GET /health` route on the resulting Preview URL. Testing authenticated endpoints requires a separate Preview-specific `UPLOAD_TOKEN` secret; YNAB account discovery and live importing are intentionally **not supported** in this safe Preview configuration.
+curl --fail-with-body "$WORKER_URL/preview" \
+  -H "Authorization: Bearer $UPLOAD_TOKEN" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary "@export.xlsx"
+~~~
 
-Run `npm test`, `npm run check`, and `npm run check:bundle` before considering merging; the last command produces a local dry-run bundle, **not a Cloudflare deployment**. The live Worker remains on `main` until this PR is merged. Existing Cloudflare Secrets and Wrangler vars are unchanged.
+`/preview` analyzes the **whole workbook** without the import cutoff. Look for `eligible`, `requiresReview`, `refundsAdjusted` and `balanceCheck`.
 
-### Additional Effect v4 adoption
+Then preview **exactly which transactions are in scope for import**:
 
-- The YNAB HTTP boundary now uses `Schema.decodeUnknownEffect` for plan/account/import responses instead of unchecked `any` casts. Malformed HTTP 200 replies fail with a typed `YnabError`; the importer **does not retry POST** on ambiguous responses.
-- SHA-256 import IDs are constructed with `Effect.forEach({ concurrency: 4 })`, retaining deterministic input ordering and the original `SPS:` namespace.
-- Effect-focused regression tests exercise malformed API JSON, account safety, matched transactions and hashing order using injected `fetch` implementations (no real YNAB calls).
-- Effect v4 schemas require TypeScript 5.9+, now reflected in `package.json`.
-- Pure Satispay ledger calculations, inclusion rules and mixed-refund logic stay untouched.
+~~~bash
+curl --fail-with-body "$WORKER_URL/prepare" \
+  -H "Authorization: Bearer $UPLOAD_TOKEN" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary "@export.xlsx"
+~~~
 
-## Effect v4 services and Layer testing (PR #2)
+`/prepare` is read-only and applies `YNAB_IMPORT_FROM`.
 
-The YNAB integration now exposes a typed `YnabService` through `Context.Service`.
-`ynabHttpLayer` constructs it from an injected Effect `HttpClient`, and
-`ynabLiveLayer` supplies the fetch-backed transport for each Cloudflare request.
-Production code resolves the service from Context, without passing YNAB fetch callbacks.
+### 5. Enable imports
 
-Unit tests use `ynabTestLayer` to replace the service without HTTP; integration
-tests use `ynabLiveLayer` with a fake fetch transport and verify that invalid
-account responses or disabled writes never issue a POST. Import IDs, wallet
-classification, refund adjustment, account guards, explicit confirmation, and
-the October 11 import cutoff are unchanged. The HTTP client never automatically
-retries imports or treats a malformed response as an unambiguous failure.
+When your dry-run looks correct, set `YNAB_WRITE_ENABLED = "true"` in `wrangler.toml` and redeploy. Imports still require the additional confirmation header:
 
-The Effect HTTP module is currently unstable, so changes to its API will be
-caught by TypeScript and the Cloudflare Wrangler bundle check.
+~~~bash
+curl --fail-with-body "$WORKER_URL/import" \
+  -H "Authorization: Bearer $UPLOAD_TOKEN" \
+  -H "X-Confirm-Import: yes" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary "@export.xlsx"
+~~~
+
+Check the response and **review, categorize, approve and reconcile** the transactions in YNAB.
+
+> [!CAUTION]
+> This importer deliberately creates **ordinary inflows and outflows**, not YNAB transfers. Reclassify wallet top-ups and movements between your own accounts as transfers in YNAB to avoid double-counting income or expenses.
+
+## Apple Shortcuts
+
+You can run the same workflow from an iPhone, without opening a terminal.
+
+Create a Shortcut that **accepts files from the Share Sheet** and uses **Get Contents of URL**:
+
+| Setting | Value |
+| --- | --- |
+| URL | `https://<your-worker>.workers.dev/import` |
+| Method | `POST` |
+| `Authorization` header | `Bearer <your-upload-token>` |
+| `X-Confirm-Import` header | `yes` |
+| Request body | **File → Shortcut Input** |
+
+Don't select JSON or Form as the request body, and don't manually set a multipart boundary.
+
+Read the JSON response with **Get Dictionary Value**: if `ok` is true, show `processed` and `duplicateImports`; otherwise, display `error`. Optionally open the YNAB app afterwards.
+
+**Treat the Shortcut as a secret** if it includes `UPLOAD_TOKEN`. Do not publish a copy with your token embedded.
+
+## API reference
+
+All responses are JSON. Every endpoint except `GET /health` requires `Authorization: Bearer <UPLOAD_TOKEN>`.
+
+| Method | Route | Description | YNAB write? |
+| --- | --- | --- | --- |
+| GET | `/health` | Health and supported capabilities | No |
+| GET | `/ynab/accounts` | Discover accessible Satispay-named YNAB accounts | No |
+| POST | `/inspect` | Inspect workbook or CSV columns and aggregate statistics | No |
+| POST | `/preview` | Analyze all wallet movements; ignore the import cutoff | No |
+| POST | `/prepare` | Build a cutoff-aware import plan | No |
+| POST | `/import` | Submit valid movements to YNAB | **Yes** |
+
+`/inspect` accepts `.xlsx` and CSV. The other upload endpoints accept `.xlsx` only. Upload a raw file body (recommended) or a multipart file in the field `file`.
+
+**Limits:** 4 MB per file, 4.5 MB per request, and at most **100 import candidates per batch**. Old binary `.xls` files are not supported.
+
+`/import` also requires `X-Confirm-Import: yes` and `YNAB_WRITE_ENABLED = "true"`. It checks that the destination account is active, on-budget, and named Satispay before writing.
+
+### Reading the result
+
+~~~json
+{
+  "ok": true,
+  "mode": "import-completed",
+  "eligible": 2,
+  "submitted": 2,
+  "processed": 1,
+  "duplicateImports": 1,
+  "ynabReportedTransactionIds": 1
+}
+~~~
+
+*Illustrative response; your results will vary.*
+
+| Field | Meaning |
+| --- | --- |
+| `eligible` | Valid, cutoff-eligible movements selected from the workbook |
+| `submitted` | Number of transactions sent to YNAB |
+| `duplicateImports` | Import IDs YNAB reports as already imported |
+| `processed` | Submitted minus duplicates; **may include transactions matched to existing YNAB entries** |
+| `imported` | Backward-compatible alias for `processed`, **not** a count of newly created YNAB rows |
+| `ynabReportedTransactionIds` | Number of YNAB transaction IDs returned; can exceed `submitted` due to matching |
+| `rejected` / `issues` | Invalid or unresolved movements blocking a write |
+| `refundsAdjusted` | Refunds corrected to reflect the original wallet-funded amount |
+| `refundsUnresolved` | Refunds that could not be matched safely |
+| `balanceCheck` | Balance reconciliation diagnostics (`ok`, `mismatch`, or `unavailable`) |
+| `inflowMilliunits` / `outflowMilliunits` / `netMilliunits` | Aggregate amounts in YNAB milliunits (EUR 1 = 1,000 milliunits) |
+
+The YNAB API does not reliably distinguish **newly created** transactions from **matched** ones using the `processed` count alone.
+
+## Accounting rules
+
+The importer tracks **cash wallet availability**, using the Italian `Disponibilità` column in the Satispay export.
+
+| Export data | YNAB behavior |
+| --- | --- |
+| Negative `Disponibilità` | Regular outflow, whatever the transaction type |
+| Positive `Disponibilità` | Regular inflow, whatever the transaction type |
+| Empty or zero `Disponibilità` | Skipped |
+| Purchase split between wallet and vouchers/benefits | Wallet-funded portion only |
+| Voucher-only or benefit-only movement | Skipped |
+| Unknown transaction type with a valid wallet movement | Included |
+| Cashback/points credited to wallet | Regular inflow, using a recognizable payee |
+
+Movement types do **not** determine whether a transaction is included or considered a transfer. If `Nome` (payee) is absent or `-`, a descriptive `Satispay — <type>` fallback is used.
+
+The importer enforces valid dates, approved status (`✅ Approvato`), unique **textual** Satispay IDs and cent-exact wallet amounts. Invalid in-scope rows prevent the batch from being written.
+
+### Mixed-funding refunds
+
+Some Satispay exports display the **entire refunded purchase value** in the wallet availability field, even when part of that purchase originally used meal vouchers or other benefits.
+
+For a `🔄 Rimborso` row, the importer looks for **exactly one** original `🏬 a un Negozio` purchase with:
+
+- The same merchant name (case- and whitespace-normalized)
+- The opposite total amount
+- An approved status
+- A preceding date, no more than **90 days** before the refund
+- A consistent allocation between wallet availability and benefit columns
+
+If the match is unambiguous, only the originally wallet-funded amount is imported as a refund. Otherwise, the refund is flagged for review instead of guessing.
+
+**Keep enough history in your export to include original purchases for any refunds.** Re-importing overlapping historical periods is supported through deterministic import IDs and the configured date cutoff.
+
+### Balance checks
+
+`/preview` and `/prepare` report `balanceCheck`. When suitable snapshots exist, it compares the delta between the oldest and newest available balances with the sum of wallet movements **between** those snapshots. The reported delta may therefore differ from `netMilliunits` across the entire export, because the oldest snapshot already includes its transaction.
+
+Balance discrepancies are **diagnostic**, not automatically a reason to block all imports. Invalid or unresolved candidate transactions do block writes.
+
+## Architecture
+
+The code separates **pure financial calculations** from **effectful I/O**.
+
+~~~text
+src/
+├── index.ts           Worker routes, authorization, bounded uploads
+├── spreadsheet.ts     XLSX decoding and workbook inspection
+├── csv.ts             CSV inspection
+├── ledger.ts          Pure refund resolution and balance auditing
+├── preview.ts         Pure whole-export classification and summaries
+├── import-plan.ts     Pure cutoff-aware import planning
+├── import-handler.ts  Decode → plan → optionally import
+├── ynab-service.ts    Effect Context.Service and Layer composition
+└── ynab.ts            Effect HttpClient, Schema validation, YNAB API
+~~~
+
+The Worker uses [Effect v4](https://effect.website/) throughout its asynchronous boundaries:
+
+- **`Effect.gen`** composes file decoding, validation and remote API calls with typed errors.
+- **`Context.Service`** declares the `YnabService` required by import and account-discovery operations.
+- **`Layer`** provides the HTTP-backed implementation at the Worker request boundary. `ynabTestLayer` replaces it with an in-memory service in tests.
+- **Effect `HttpClient` + `FetchHttpClient`** run YNAB API requests using a fetch-compatible transport suitable for Cloudflare Workers.
+- **`Schema.decodeUnknownEffect`** validates incoming YNAB JSON instead of trusting untyped responses.
+- **`Effect.forEach`** produces stable SHA-256 import IDs with bounded concurrency.
+
+The domain modules stay independent of Effect. There is no global runtime holding Cloudflare request credentials; the live service Layer is provided per request.
+
+**No automatic retries of YNAB POST imports.** A response can be lost after YNAB accepts a request, so ambiguous results must be checked before retrying.
+
+## Development
+
+~~~bash
+npm install
+npm test                # Test suite
+npm run check           # TypeScript type check
+npm run check:bundle    # Wrangler dry-run bundle (no deployment)
+npm run dev             # Local Worker
+~~~
+
+The tests use Node's built-in test runner. They cover wallet-only funding, mixed refunds, duplicate IDs, eligibility filters, YNAB result handling, HTTP failures, and Effect service Layers.
+
+GitHub Actions runs the test suite, TypeScript checks, and Wrangler bundle checks on pull requests and pushes to `main`.
+
+### Cloudflare Preview environments
+
+The example Wrangler configuration includes a separate `[previews.vars]` block, with YNAB writes **disabled** and placeholder account IDs. Cloudflare's `wrangler preview` expects its preview configuration to be explicit.
+
+Test `GET /health` without credentials. For authenticated endpoints, configure a **separate preview-only `UPLOAD_TOKEN`**. Do not copy production YNAB credentials into an untrusted Preview environment.
+
+## Security and limitations
+
+- Satispay exports are uploaded **on demand**. This project does not log into, scrape, or continuously synchronize a Satispay account.
+- Authentication is required on all non-health endpoints. Keep both tokens secret, rotate them if exposed, and never commit a real export.
+- The account must be active, on-budget and contain "Satispay" in its name.
+- Sensitive transaction details are not included in aggregate API responses.
+- Exports are parsed in memory, with strict request-size limits.
+- YNAB categories, real transfers, approval and reconciliation remain manual.
+- A refund whose original purchase is missing or ambiguous requires review; try a broader export.
+- Imported transactions are sent as cleared and unapproved (`cleared: "cleared"`, `approved: false`).
+- If the Worker reports an uncertain YNAB response, inspect YNAB before resubmitting.
+
+## Contributing
+
+Issues and pull requests are welcome. For changes to financial logic, include regression tests covering monetary precision, mixed funding, refunds, duplicate IDs, and idempotency. For HTTP or service changes, add tests using the Effect Test Layer or a fake HTTP transport.
+
+Please use **synthetic exports and tokens** in issues, tests, and pull requests. Never attach production financial statements, account identifiers, or credentials.
+
+---
+
+Built with [Effect](https://effect.website/), [Cloudflare Workers](https://developers.cloudflare.com/workers/), and the [YNAB API](https://api.ynab.com/). Satispay and YNAB are trademarks of their respective owners.
