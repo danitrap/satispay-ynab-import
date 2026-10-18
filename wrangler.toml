@@ -9,7 +9,7 @@ workers_dev = true
 YNAB_WRITE_ENABLED = "false"
 
 # Plan and active on-budget Satispay account confirmed via YNAB account discovery.
-# Keep the start date unset until the user chooses the first import date.
+# The inclusive import cutoff is set to 2026-10-11 for controlled matching tests.
 YNAB_PLAN_ID = "774d71aa-9e22-4991-a4cd-1e37aecda617"
 YNAB_ACCOUNT_ID = "231101d1-9443-4f7e-a2ca-692199fc3b22"
 YNAB_IMPORT_FROM = "2026-10-11"
