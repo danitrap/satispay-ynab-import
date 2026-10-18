@@ -2,9 +2,10 @@
 
 **Import Satispay transactions into YNAB. Self-hosted, reviewable, and built with Cloudflare Workers + Effect v4.**
 
-![TypeScript](https://img.shields.io/badge/TypeScript-5.9%2B-3178C6?logo=typescript&logoColor=white)
-![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)
-![Effect](https://img.shields.io/badge/Effect-v4-6750A4)
+[![TypeScript 7](https://img.shields.io/badge/TypeScript-7.0.2-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Effect 4](https://img.shields.io/badge/Effect-4.0.5-6750A4)](https://effect.website/)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://developers.cloudflare.com/workers/)
+[![Apache License 2.0](https://img.shields.io/badge/License-Apache%202.0-D22128?logo=apache&logoColor=white)](LICENSE)
 
 Turn a manually exported Satispay Excel workbook into YNAB transactions using a small HTTP API. Inspect an export, preview the impact on your budget, and explicitly confirm an import. Use it from [Apple Shortcuts](https://support.apple.com/guide/shortcuts/welcome/ios), a terminal, or any HTTP client.
 
@@ -72,7 +73,7 @@ Fork this repository on GitHub, then clone **your fork**:
 ~~~bash
 git clone https://github.com/<your-user>/satispay-ynab-import.git
 cd satispay-ynab-import
-npm install
+npm ci
 ~~~
 
 ### 2. Set up your own Worker
@@ -331,8 +332,10 @@ The domain modules stay independent of Effect. There is no global runtime holdin
 
 ## Development
 
+Use `npm ci` to install the exact dependency versions recorded in `package-lock.json` (Node.js 22+).
+
 ~~~bash
-npm install
+npm ci
 npm test                # Test suite
 npm run check           # TypeScript type check
 npm run check:bundle    # Wrangler dry-run bundle (no deployment)
