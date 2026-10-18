@@ -1,7 +1,9 @@
 import { decodeCsv, parseCsv } from "./csv.ts";
 import { inspectXlsx, previewXlsx } from "./spreadsheet.ts";
+import { processImport } from "./import-handler.ts";
+import { findSatispayAccounts, type YnabEnv } from "./ynab.ts";
 
-type Env = { UPLOAD_TOKEN: string };
+type Env = { UPLOAD_TOKEN: string } & YnabEnv;
 const MAX_FILE_BYTES = 4_000_000;
 const MAX_REQUEST_BYTES = 4_500_000;
 
@@ -16,15 +18,24 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") {
-      return json({ ok: true, service: "satispay-ynab-import", mode: "inspect-only", formats: ["xlsx","csv"], upload: ["raw","multipart"] });
+      return json({ ok: true, service: "satispay-ynab-import", mode: "ready", formats: ["xlsx","csv"], upload: ["raw","multipart"], routes: ["/inspect","/preview","/prepare","/import","/ynab/accounts"] });
     }
-    if (request.method !== "POST" || !["/inspect", "/preview"].includes(url.pathname)) {
+    const listAccounts=request.method==="GET" && url.pathname==="/ynab/accounts";
+    const upload=request.method==="POST" && ["/inspect","/preview","/prepare","/import"].includes(url.pathname);
+    if(!listAccounts && !upload) {
       return json({ ok: false, error: "Not found" }, 404);
     }
     if (!env.UPLOAD_TOKEN || request.headers.get("Authorization") !== "Bearer " + env.UPLOAD_TOKEN) {
       return json({ ok: false, error: "Unauthorized" }, 401);
     }
+    if(listAccounts) {
+      try{return json({ok:true,...await findSatispayAccounts(env)});}
+      catch(e){return json({ok:false,error:e instanceof Error?e.message:"Account lookup failed"},502);}
+    }
+    if(url.pathname==="/import" && request.headers.get("X-Confirm-Import")!=="yes")
+      return json({ok:false,error:"Set X-Confirm-Import: yes to enable this request; no writes performed"},403);
     const preview = url.pathname === "/preview";
+    const importPath=url.pathname==="/import"||url.pathname==="/prepare";
     const contentType = request.headers.get("Content-Type") ?? "application/octet-stream";
     const contentLength = Number(request.headers.get("Content-Length") ?? "0");
     if (contentLength > MAX_REQUEST_BYTES) return json({ ok: false, error: "Upload too large" }, 413);
@@ -80,6 +91,14 @@ export default {
     }
     const xlsx = bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
     if (xlsx) {
+      if(importPath) {
+        try {
+          const result=await processImport(url.pathname==="/import"?"import":"prepare",bytes.buffer as ArrayBuffer,env);
+          return json(result.body,result.status);
+        } catch(e) {
+          return json({ok:false,error:e instanceof Error?e.message:"Import processing failed",imported:0},422);
+        }
+      }
       try {
         const inspection = preview
           ? await previewXlsx(bytes.buffer as ArrayBuffer)
@@ -93,7 +112,7 @@ export default {
     if (fileName.toLowerCase().endsWith(".xlsx") || contentType.toLowerCase().includes("spreadsheetml")) {
       return json({ ok: false, error: "Not a valid XLSX (ZIP signature missing)" }, 422);
     }
-    if (preview) return json({ ok: false, error: "Preview currently supports XLSX only" }, 415);
+    if (preview || importPath) return json({ ok: false, error: "Preview/import supports XLSX only" }, 415);
     try {
       const parsed = parseCsv(decodeCsv(bytes));
       // No CSV contents are saved, logged, or transmitted to YNAB in this starter.
