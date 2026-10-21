@@ -22,7 +22,7 @@ const runRequest = (
     body: bytes,
   });
   return Effect.runPromise(
-    handleRequestEffect(request, env).pipe(Effect.provide(ynabLiveLayer(env, fetchFn))),
+    handleRequestEffect(request).pipe(Effect.provide(ynabLiveLayer(env, fetchFn))),
   );
 };
 

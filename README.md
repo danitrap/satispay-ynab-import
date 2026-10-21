@@ -322,6 +322,7 @@ src/
 ├── import-plan.ts     Pure cutoff-aware import planning
 ├── import-handler.ts  Decode → plan → optionally import
 ├── ynab-service.ts    Effect Context.Service and Layer composition
+├── ynab-contract.ts   Explicit, infrastructure-free YNAB operation contracts
 └── ynab.ts            Effect HttpClient, Schema validation, YNAB API
 ~~~
 
@@ -337,6 +338,8 @@ The Worker uses [Effect v4](https://effect.website/) throughout its asynchronous
 - **`Data.TaggedError` + `Effect.catchTags`** distinguish configuration, validation, transport and uncertain import failures. The import pipeline returns tagged application outcomes; the router owns HTTP status codes and JSON responses.
 
 The domain modules stay independent of Effect. There is no global runtime holding Cloudflare request credentials; the live service Layer is provided per request.
+
+`requestLiveLayer` is the single composition root for each request. It provides one configuration module and the fetch transport, then builds the YNAB implementation, which closes over those dependencies. The router and import programs consume their declared requirements; `YnabServiceApi` describes public results and failures independently of the implementation. Type-level tests verify that public operations leave no infrastructure requirements for callers.
 
 **No automatic retries of YNAB POST imports.** A response can be lost after YNAB accepts a request, so ambiguous results must be checked before retrying.
 

@@ -9,10 +9,11 @@ import { readSheetEffect, WorkbookError } from "../src/spreadsheet.ts";
 test("Cloudflare request handler is an Effect and retains unauthorized protection", async () => {
   const program = handleRequestEffect(
     new Request("https://example.invalid/import", { method: "POST" }),
-    { UPLOAD_TOKEN: "secret" },
   );
   assert.equal(Effect.isEffect(program), true);
-  const res = await Effect.runPromise(program);
+  const res = await Effect.runPromise(
+    program.pipe(Effect.provide(ynabLiveLayer({ UPLOAD_TOKEN: "secret" }))),
+  );
   assert.equal(res.status, 401);
 });
 test("Effect YNAB program prevents writes while disabled", async () => {

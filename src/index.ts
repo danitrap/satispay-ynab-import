@@ -1,10 +1,10 @@
 import { Data, Effect, Redacted } from "effect";
-import { AppConfig, appConfigLayer, type AppEnv } from "./config.ts";
+import { AppConfig, type AppEnv } from "./config.ts";
 import { decodeCsv, parseCsv } from "./csv.ts";
 import { inspectXlsxEffect, previewXlsxEffect } from "./spreadsheet.ts";
 import { processImportEffect } from "./import-handler.ts";
 import type { YnabFailure } from "./errors.ts";
-import { findAccountsEffect, ynabLiveLayer } from "./ynab-service.ts";
+import { findAccountsEffect, requestLiveLayer } from "./ynab-service.ts";
 
 type Env = AppEnv;
 const MAX_FILE_BYTES = 4_000_000;
@@ -103,7 +103,7 @@ const decodeMultipartEffect = (body: Uint8Array, contentType: string) =>
   });
 
 /** Request adapter: there is a single Effect runtime boundary per incoming request. */
-export function handleRequestEffect(request: Request, env: Env) {
+export function handleRequestEffect(request: Request) {
   return Effect.gen(function* () {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health")
@@ -291,20 +291,22 @@ export function handleRequestEffect(request: Request, env: Env) {
             ynabFailureStatus(error.reason),
           ),
         ),
+      YnabWriteDisabledError: ynabFailureResponse,
+      YnabImportRejectedError: ynabFailureResponse,
+      YnabAccountError: ynabFailureResponse,
       YnabError: ynabFailureResponse,
       YnabTransportError: ynabFailureResponse,
       YnabHttpError: ynabFailureResponse,
       YnabResponseError: ynabFailureResponse,
       YnabImportUncertainError: ynabFailureResponse,
     }),
-    Effect.provide(appConfigLayer(env)),
   );
 }
 
 export default {
   fetch(request: Request, env: Env): Promise<Response> {
     return Effect.runPromise(
-      handleRequestEffect(request, env).pipe(Effect.provide(ynabLiveLayer(env))),
+      handleRequestEffect(request).pipe(Effect.provide(requestLiveLayer(env))),
     );
   },
 };
