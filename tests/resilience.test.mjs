@@ -4,7 +4,12 @@ import { Clock, Effect, Fiber, Logger, Metric } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
 import { findAccountsEffect, importPlanEffect, requestLiveLayer } from "../src/ynab-service.ts";
 import worker, { handleRequestEffect } from "../src/index.ts";
-import { operationCount, operationDuration, observeOperation } from "../src/telemetry.ts";
+import {
+  operationCount,
+  operationDuration,
+  observeOperation,
+  operationLogger,
+} from "../src/telemetry.ts";
 
 const env = {
   UPLOAD_TOKEN: "upload",
@@ -350,20 +355,51 @@ test("request composition emits structured console logs without upload contents 
   assert.equal(logs.length, 1);
   const log = logs[0];
   assert.equal(log.level, "INFO");
-  assert.deepEqual(Object.keys(log.message).sort(), [
+  assert.equal(log.message, "upload completed");
+  assert.equal(log.event, "satispay.operation");
+  assert.equal(log.operation, "upload");
+  assert.equal(log.outcome, "success");
+  assert.ok(Number.isFinite(log.durationMs) && log.durationMs >= 0);
+  assert.equal(log.cause, undefined);
+  assert.deepEqual(Object.keys(log).sort(), [
+    "annotations",
+    "cause",
     "durationMs",
     "event",
+    "fiberId",
+    "level",
+    "message",
     "operation",
     "outcome",
+    "spans",
+    "timestamp",
   ]);
-  assert.equal(log.message.event, "satispay.operation");
-  assert.equal(log.message.operation, "upload");
-  assert.equal(log.message.outcome, "success");
-  assert.ok(Number.isFinite(log.message.durationMs) && log.message.durationMs >= 0);
-  assert.equal(log.cause, undefined);
   for (const secret of ["private-payee", "12.34", "Bearer", env.YNAB_TOKEN]) {
     assert.equal(JSON.stringify(logs).includes(secret), false);
   }
+});
+
+test("operation formatter gives failures readable messages and preserves ordinary logs", async () => {
+  const logs = await Effect.runPromise(
+    Effect.gen(function* () {
+      yield* Effect.fail({ secret: "private-failure" }).pipe(
+        observeOperation("ynab.write"),
+        Effect.flip,
+      );
+      yield* Effect.logInfo("ordinary message");
+      return yield* TestConsole.logLines;
+    }).pipe(Effect.provide(Logger.layer([operationLogger])), Effect.provide(TestConsole.layer)),
+  );
+  assert.equal(logs.length, 2);
+  assert.equal(logs[0].message, "ynab.write failed");
+  assert.equal(logs[0].event, "satispay.operation");
+  assert.equal(logs[0].operation, "ynab.write");
+  assert.equal(logs[0].outcome, "failure");
+  assert.ok(Number.isFinite(logs[0].durationMs) && logs[0].durationMs >= 0);
+  assert.equal(logs[0].cause, undefined);
+  assert.equal(JSON.stringify(logs).includes("private-failure"), false);
+  assert.equal(logs[1].message, "ordinary message");
+  assert.equal(logs[1].operation, undefined);
 });
 
 test("malformed YNAB envelopes and payloads keep read and uncertain write failures without retries", async () => {

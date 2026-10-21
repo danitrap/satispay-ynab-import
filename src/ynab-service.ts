@@ -1,4 +1,5 @@
 import { workbookReaderLayer } from "./workbook-reader.ts";
+import { operationLogger } from "./telemetry.ts";
 import { Context, Effect, Layer, Logger } from "effect";
 import { appConfigLayer, type AppEnv } from "./config.ts";
 import { FetchHttpClient } from "effect/http";
@@ -22,7 +23,7 @@ export const requestLiveLayer = (env: AppEnv, fetchFn: typeof fetch = fetch) => 
   return Layer.mergeAll(
     ynabHttpLayer.pipe(Layer.provideMerge(config), Layer.provide(transport)),
     workbookReaderLayer,
-    Logger.layer([Logger.withConsoleLog(Logger.formatStructured)]),
+    Logger.layer([operationLogger]),
   );
 };
 

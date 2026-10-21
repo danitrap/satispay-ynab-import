@@ -1,4 +1,33 @@
-import { Duration, Effect, Exit, Metric } from "effect";
+import { Duration, Effect, Exit, Logger, Metric } from "effect";
+
+/** Keep operation fields searchable while giving Workers Logs a readable message. */
+export const operationLogger = Logger.withConsoleLog(
+  Logger.map(Logger.formatStructured, (log) => {
+    const entry = log.message;
+    if (
+      typeof entry !== "object" ||
+      entry === null ||
+      !("event" in entry) ||
+      entry.event !== "satispay.operation" ||
+      !("operation" in entry) ||
+      typeof entry.operation !== "string" ||
+      !("outcome" in entry) ||
+      (entry.outcome !== "success" && entry.outcome !== "failure") ||
+      !("durationMs" in entry) ||
+      typeof entry.durationMs !== "number"
+    ) {
+      return log;
+    }
+    return {
+      ...log,
+      message: `${entry.operation} ${entry.outcome === "success" ? "completed" : "failed"}`,
+      event: entry.event,
+      operation: entry.operation,
+      outcome: entry.outcome,
+      durationMs: entry.durationMs,
+    };
+  }),
+);
 
 type Operation = "upload" | "workbook" | "import" | "ynab.read" | "ynab.write";
 export const operationDuration = Metric.histogram("satispay_operation_duration_ms", {

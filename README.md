@@ -154,8 +154,9 @@ For Cloudflare Git-connected deployments, use **`npx wrangler deploy`** as the d
 Workers Logs is enabled in both Wrangler configurations at 100% request sampling.
 After deployment, view logs in Cloudflare → Workers & Pages → your Worker → Observability.
 Completed instrumented operations (`upload`, `workbook`, `import`, `ynab.read`, and
-`ynab.write`) emit structured Effect logs with `message.event = "satispay.operation"`,
-`message.operation`, `message.outcome` (`success` or `failure`), and `message.durationMs`.
+`ynab.write`) emit structured Effect logs with a text `message` (for example,
+`"import completed"` or `"ynab.write failed"`) and top-level `event = "satispay.operation"`,
+`operation`, `outcome` (`success` or `failure`), and `durationMs` fields.
 Durations use a monotonic clock; failures include defects and interruptions. Operation
 logs never include inputs, results, error payloads, transaction details, or credentials.
 Cloudflare also records invocation metadata independently of these application logs.
