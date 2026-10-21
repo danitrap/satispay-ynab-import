@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import worker from "../src/index.ts";
 import { Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
-import { ynabLiveLayer, findAccountsEffect } from "../src/ynab-service.ts";
+import { requestLiveLayer, findAccountsEffect } from "../src/ynab-service.ts";
 
 test("account discovery reports missing configuration without exposing bindings", async () => {
   const response = await worker.fetch(
@@ -40,7 +40,7 @@ test("health and CSV inspection ignore unrelated invalid YNAB configuration", as
 test("invalid secrets never appear in typed configuration failures or HTTP responses", async () => {
   const env = { UPLOAD_TOKEN: "upload-secret", YNAB_TOKEN: " secret-with-invalid-whitespace " };
   const error = await Effect.runPromise(
-    findAccountsEffect.pipe(Effect.provide(ynabLiveLayer(env)), Effect.flip),
+    findAccountsEffect.pipe(Effect.provide(requestLiveLayer(env)), Effect.flip),
   );
   assert.equal(error._tag, "ConfigurationError");
   assert.equal(error.key, "YNAB_TOKEN");
@@ -50,7 +50,7 @@ test("invalid secrets never appear in typed configuration failures or HTTP respo
       new Request("https://local.invalid/ynab/accounts", {
         headers: { Authorization: "Bearer upload-secret" },
       }),
-    ).pipe(Effect.provide(ynabLiveLayer(env))),
+    ).pipe(Effect.provide(requestLiveLayer(env))),
   );
   assert.equal(response.status, 409);
   assert.equal((await response.text()).includes("secret-with-invalid-whitespace"), false);
@@ -65,7 +65,7 @@ test("concurrent requests use only their own YNAB credentials", async () => {
   await Promise.all(
     ["first-secret", "second-secret"].map((token) =>
       Effect.runPromise(
-        findAccountsEffect.pipe(Effect.provide(ynabLiveLayer({ YNAB_TOKEN: token }, fetchFn))),
+        findAccountsEffect.pipe(Effect.provide(requestLiveLayer({ YNAB_TOKEN: token }, fetchFn))),
       ),
     ),
   );

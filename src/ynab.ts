@@ -159,132 +159,126 @@ export const makeYnabClient = Effect.gen(function* () {
         );
   }
 
-  const findSatispayAccountsEffect = Effect.fn("satispay.ynab.findAccounts")(() =>
-    Effect.gen(function* () {
-      const token = Redacted.value(yield* config.token);
-      const rawPlans = yield* apiEffect("/plans", token, "GET");
-      const { plans } = yield* Schema.decodeUnknownEffect(PlansSchema)(rawPlans).pipe(
-        Effect.mapError(() => new YnabResponseError({ reason: "Plans" })),
-      );
-      const matches: Array<YnabAccounts["matches"][number]> = [];
-      for (const plan of plans.slice(0, 20)) {
-        const rawAccounts = yield* apiEffect(
-          "/plans/" + encodeURIComponent(plan.id) + "/accounts",
-          token,
-          "GET",
-        );
-        const { accounts } = yield* Schema.decodeUnknownEffect(AccountsSchema)(rawAccounts).pipe(
-          Effect.mapError(() => new YnabResponseError({ reason: "Accounts" })),
-        );
-        for (const account of accounts) {
-          if (
-            account.name.toLowerCase().includes("satispay") &&
-            !account.closed &&
-            !account.deleted
-          ) {
-            matches.push({
-              planId: plan.id,
-              planName: plan.name,
-              accountId: account.id,
-              accountName: account.name,
-              onBudget: account.on_budget,
-            });
-          }
-        }
-      }
-      return { matches };
-    }),
-  );
-
-  const validateTargetAccountEffect = Effect.fn("satispay.ynab.validateAccount")(() =>
-    Effect.gen(function* () {
-      const target = yield* config.target;
-      const token = Redacted.value(target.token);
-      const rawAccount = yield* apiEffect(
-        "/plans/" +
-          encodeURIComponent(target.planId) +
-          "/accounts/" +
-          encodeURIComponent(target.accountId),
+  const findSatispayAccountsEffect = Effect.fn("satispay.ynab.findAccounts")(function* () {
+    const token = Redacted.value(yield* config.token);
+    const rawPlans = yield* apiEffect("/plans", token, "GET");
+    const { plans } = yield* Schema.decodeUnknownEffect(PlansSchema)(rawPlans).pipe(
+      Effect.mapError(() => new YnabResponseError({ reason: "Plans" })),
+    );
+    const matches: Array<YnabAccounts["matches"][number]> = [];
+    for (const plan of plans.slice(0, 20)) {
+      const rawAccounts = yield* apiEffect(
+        "/plans/" + encodeURIComponent(plan.id) + "/accounts",
         token,
         "GET",
       );
-      const { account } = yield* Schema.decodeUnknownEffect(AccountResponseSchema)(rawAccount).pipe(
-        Effect.mapError(
-          () =>
-            new YnabAccountError({
-              reason: "Malformed",
-            }),
-        ),
+      const { accounts } = yield* Schema.decodeUnknownEffect(AccountsSchema)(rawAccounts).pipe(
+        Effect.mapError(() => new YnabResponseError({ reason: "Accounts" })),
       );
-      const reason =
-        account.id !== target.accountId
-          ? "WrongId"
-          : !account.name.toLowerCase().includes("satispay")
-            ? "WrongName"
-            : !account.on_budget
-              ? "OffBudget"
-              : account.closed
-                ? "Closed"
-                : account.deleted
-                  ? "Deleted"
-                  : undefined;
-      if (reason) return yield* Effect.fail(new YnabAccountError({ reason }));
-      return account;
-    }),
-  );
+      for (const account of accounts) {
+        if (
+          account.name.toLowerCase().includes("satispay") &&
+          !account.closed &&
+          !account.deleted
+        ) {
+          matches.push({
+            planId: plan.id,
+            planName: plan.name,
+            accountId: account.id,
+            accountName: account.name,
+            onBudget: account.on_budget,
+          });
+        }
+      }
+    }
+    return { matches };
+  });
 
-  const sendToYnabEffect = Effect.fn("satispay.ynab.importPlan")((plan: ImportPlan) =>
-    Effect.gen(function* () {
-      if (!(yield* config.writesEnabled))
-        return yield* Effect.fail(
-          new YnabWriteDisabledError({
-            message: "YNAB write disabled: set YNAB_WRITE_ENABLED=true",
+  const validateTargetAccountEffect = Effect.fn("satispay.ynab.validateAccount")(function* () {
+    const target = yield* config.target;
+    const token = Redacted.value(target.token);
+    const rawAccount = yield* apiEffect(
+      "/plans/" +
+        encodeURIComponent(target.planId) +
+        "/accounts/" +
+        encodeURIComponent(target.accountId),
+      token,
+      "GET",
+    );
+    const { account } = yield* Schema.decodeUnknownEffect(AccountResponseSchema)(rawAccount).pipe(
+      Effect.mapError(
+        () =>
+          new YnabAccountError({
+            reason: "Malformed",
           }),
-        );
-      if (plan.counts.rejected > 0)
-        return yield* Effect.fail(
-          new YnabImportRejectedError({
-            reason: "AmbiguousMovements",
-          }),
-        );
-      if (plan.candidates.length > 100)
-        return yield* Effect.fail(new YnabImportRejectedError({ reason: "BatchTooLarge" }));
-      yield* validateTargetAccountEffect();
-      if (!plan.candidates.length)
-        return { submitted: 0, processed: 0, duplicateImports: 0, ynabReportedTransactionIds: 0 };
-      const target = yield* config.target;
-      const transactions = yield* buildYnabTransactionsEffect(plan.candidates, target.accountId);
-      const token = Redacted.value(target.token);
-      const rawResult = yield* apiEffect(
-        "/plans/" + encodeURIComponent(target.planId) + "/transactions",
-        token,
-        "POST",
-        { transactions },
+      ),
+    );
+    const reason =
+      account.id !== target.accountId
+        ? "WrongId"
+        : !account.name.toLowerCase().includes("satispay")
+          ? "WrongName"
+          : !account.on_budget
+            ? "OffBudget"
+            : account.closed
+              ? "Closed"
+              : account.deleted
+                ? "Deleted"
+                : undefined;
+    if (reason) return yield* Effect.fail(new YnabAccountError({ reason }));
+    return account;
+  });
+
+  const sendToYnabEffect = Effect.fn("satispay.ynab.importPlan")(function* (plan: ImportPlan) {
+    if (!(yield* config.writesEnabled))
+      return yield* Effect.fail(
+        new YnabWriteDisabledError({
+          message: "YNAB write disabled: set YNAB_WRITE_ENABLED=true",
+        }),
       );
-      const data = yield* Schema.decodeUnknownEffect(ImportResultSchema)(rawResult).pipe(
-        Effect.mapError(
-          () =>
-            new YnabImportUncertainError({
-              reason: "Contract",
-            }),
-        ),
+    if (plan.counts.rejected > 0)
+      return yield* Effect.fail(
+        new YnabImportRejectedError({
+          reason: "AmbiguousMovements",
+        }),
       );
-      const submitted = transactions.length;
-      const duplicateImports = data.duplicate_import_ids.length;
-      if (duplicateImports > submitted)
-        return yield* Effect.fail(
+    if (plan.candidates.length > 100)
+      return yield* Effect.fail(new YnabImportRejectedError({ reason: "BatchTooLarge" }));
+    yield* validateTargetAccountEffect();
+    if (!plan.candidates.length)
+      return { submitted: 0, processed: 0, duplicateImports: 0, ynabReportedTransactionIds: 0 };
+    const target = yield* config.target;
+    const transactions = yield* buildYnabTransactionsEffect(plan.candidates, target.accountId);
+    const token = Redacted.value(target.token);
+    const rawResult = yield* apiEffect(
+      "/plans/" + encodeURIComponent(target.planId) + "/transactions",
+      token,
+      "POST",
+      { transactions },
+    );
+    const data = yield* Schema.decodeUnknownEffect(ImportResultSchema)(rawResult).pipe(
+      Effect.mapError(
+        () =>
           new YnabImportUncertainError({
-            reason: "DuplicateCount",
+            reason: "Contract",
           }),
-        );
-      return {
-        submitted,
-        processed: submitted - duplicateImports,
-        duplicateImports,
-        ynabReportedTransactionIds: data.transaction_ids.length,
-      };
-    }),
-  );
+      ),
+    );
+    const submitted = transactions.length;
+    const duplicateImports = data.duplicate_import_ids.length;
+    if (duplicateImports > submitted)
+      return yield* Effect.fail(
+        new YnabImportUncertainError({
+          reason: "DuplicateCount",
+        }),
+      );
+    return {
+      submitted,
+      processed: submitted - duplicateImports,
+      duplicateImports,
+      ynabReportedTransactionIds: data.transaction_ids.length,
+    };
+  });
 
   return {
     findAccounts: findSatispayAccountsEffect(),

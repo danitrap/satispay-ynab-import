@@ -50,8 +50,8 @@ const ynabFailureResponse = (error: YnabFailure) =>
   Effect.succeed(json({ ok: false, error: error.message }, ynabFailureStatus(error)));
 
 /** Bounded upload reads: also protect requests without Content-Length. */
-const readRequestBodyEffect = Effect.fn("satispay.upload")((request: Request) =>
-  Effect.gen(function* () {
+const readRequestBodyEffect = Effect.fn("satispay.upload")(
+  function* (request: Request) {
     const body = request.body;
     if (!body) return yield* Effect.fail(new UploadError("Missing request body"));
     let total = 0;
@@ -82,13 +82,12 @@ const readRequestBodyEffect = Effect.fn("satispay.upload")((request: Request) =>
       offset += chunk.byteLength;
     }
     return bytes;
-  }).pipe(
-    Effect.timeoutOrElse({
-      duration: "30 seconds",
-      orElse: () => Effect.fail(new UploadError("Upload timed out", 408)),
-    }),
-    observeOperation("upload"),
-  ),
+  },
+  Effect.timeoutOrElse({
+    duration: "30 seconds",
+    orElse: () => Effect.fail(new UploadError("Upload timed out", 408)),
+  }),
+  observeOperation("upload"),
 );
 
 const decodeMultipartEffect = (body: Uint8Array, contentType: string) =>
