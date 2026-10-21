@@ -10,18 +10,27 @@ export const operationCount = Metric.counter("satispay_operations_total", { incr
 export const observeOperation =
   (operation: Operation) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(
-      Effect.trackDuration(
-        Metric.withAttributes(operationDuration, { operation }),
-        Duration.toMillis,
-      ),
-      Effect.onExit((exit) =>
-        Metric.update(
-          Metric.withAttributes(operationCount, {
-            operation,
-            outcome: Exit.isSuccess(exit) ? "success" : "failure",
+    Effect.clockWith((clock) => {
+      const start = clock.monotonicTimeNanosUnsafe();
+      return effect.pipe(
+        Effect.onExit((exit) =>
+          Effect.gen(function* () {
+            const durationMs = Duration.toMillis(
+              Duration.nanos(clock.monotonicTimeNanosUnsafe() - start),
+            );
+            const outcome = Exit.isSuccess(exit) ? "success" : "failure";
+            yield* Metric.update(
+              Metric.withAttributes(operationDuration, { operation }),
+              durationMs,
+            );
+            yield* Metric.update(Metric.withAttributes(operationCount, { operation, outcome }), 1);
+            yield* Effect.logInfo({
+              event: "satispay.operation",
+              operation,
+              outcome,
+              durationMs,
+            });
           }),
-          1,
         ),
-      ),
-    );
+      );
+    });
