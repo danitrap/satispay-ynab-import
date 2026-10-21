@@ -1,6 +1,6 @@
 import type { YnabAccountId, YnabPlanId } from "./domain.ts";
 import type { Effect } from "effect";
-import type { YnabFailure } from "./errors.ts";
+import type { YnabReadFailure, YnabAccountFailure, YnabImportFailure } from "./errors.ts";
 import type { ImportPlan } from "./import-plan.ts";
 
 export type YnabAccount = {
@@ -28,7 +28,7 @@ export type YnabImportResult = {
 
 /** Implementations close over their dependencies; callers only need this contract. */
 export interface YnabServiceApi {
-  readonly findAccounts: Effect.Effect<YnabAccounts, YnabFailure>;
-  readonly validateAccount: Effect.Effect<YnabAccount, YnabFailure>;
-  readonly importPlan: (plan: ImportPlan) => Effect.Effect<YnabImportResult, YnabFailure>;
+  readonly findAccounts: Effect.Effect<YnabAccounts, YnabReadFailure>;
+  readonly validateAccount: Effect.Effect<YnabAccount, YnabAccountFailure>;
+  readonly importPlan: (plan: ImportPlan) => Effect.Effect<YnabImportResult, YnabImportFailure>;
 }

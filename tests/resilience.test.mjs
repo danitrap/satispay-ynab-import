@@ -107,8 +107,7 @@ test("a server error after POST is uncertain and never retried", async () => {
     importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, fetchFn)), Effect.flip),
   );
   assert.equal(error._tag, "YnabImportUncertainError");
-  assert.equal(error.reason, "Http");
-  assert.equal(error.status, 503);
+  assert.deepEqual(error.reason, { _tag: "Http", status: 503 });
   assert.equal(writes, 1);
 });
 
@@ -146,7 +145,7 @@ test(
         yield* TestClock.adjust("10 seconds");
         const error = yield* Fiber.join(fiber);
         assert.equal(error._tag, "YnabImportUncertainError");
-        assert.equal(error.reason, "Timeout");
+        assert.deepEqual(error.reason, { _tag: "Timeout" });
         assert.equal(writes, 1);
         assert.equal(aborted, true);
       }),

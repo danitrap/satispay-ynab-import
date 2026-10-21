@@ -1,3 +1,4 @@
+import { workbookReaderLayer } from "./workbook-reader.ts";
 import { Context, Effect, Layer } from "effect";
 import { appConfigLayer, type AppEnv } from "./config.ts";
 import { FetchHttpClient } from "effect/http";
@@ -18,7 +19,10 @@ export const requestLiveLayer = (env: AppEnv, fetchFn: typeof fetch = fetch) => 
   const transport = FetchHttpClient.layer.pipe(
     Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchFn)),
   );
-  return ynabHttpLayer.pipe(Layer.provideMerge(config), Layer.provide(transport));
+  return Layer.mergeAll(
+    ynabHttpLayer.pipe(Layer.provideMerge(config), Layer.provide(transport)),
+    workbookReaderLayer,
+  );
 };
 
 export const ynabTestLayer = (service: YnabServiceApi) => Layer.succeed(YnabService, service);

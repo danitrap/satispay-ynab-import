@@ -48,24 +48,25 @@ export class YnabImportRejectedError extends Data.TaggedError("YnabImportRejecte
   }
 }
 export class YnabImportUncertainError extends Data.TaggedError("YnabImportUncertainError")<{
-  readonly reason: "Network" | "Timeout" | "Http" | "Json" | "Contract" | "DuplicateCount";
-  readonly status?: number;
+  readonly reason:
+    | { readonly _tag: "Http"; readonly status: number }
+    | { readonly _tag: "Network" | "Timeout" | "Json" | "Contract" | "DuplicateCount" };
 }> {
   override get message(): string {
     return failureMessage(this);
   }
 }
 
-export type YnabFailure =
-  | ConfigurationError
+export type YnabReadFailure =
+  ConfigurationError | YnabTransportError | YnabHttpError | YnabResponseError;
+export type YnabAccountFailure = YnabReadFailure | YnabAccountError;
+export type YnabImportFailure =
+  | YnabAccountFailure
   | YnabError
-  | YnabTransportError
-  | YnabHttpError
-  | YnabResponseError
-  | YnabAccountError
   | YnabWriteDisabledError
   | YnabImportRejectedError
   | YnabImportUncertainError;
+export type YnabFailure = YnabImportFailure;
 
 export class ImportPlanError extends Data.TaggedError("ImportPlanError")<{
   readonly reason: PlanInputReason;
@@ -80,6 +81,9 @@ export class ImportBlockedError extends Data.TaggedError("ImportBlockedError")<{
 }> {}
 export class ImportFailedError extends Data.TaggedError("ImportFailedError")<{
   readonly summary: ImportSummary;
-  readonly reason: YnabFailure;
-  readonly message: string;
-}> {}
+  readonly reason: YnabImportFailure;
+}> {
+  override get message(): string {
+    return this.reason.message;
+  }
+}
