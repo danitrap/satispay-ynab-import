@@ -50,7 +50,6 @@ test("invalid secrets never appear in typed configuration failures or HTTP respo
       new Request("https://local.invalid/ynab/accounts", {
         headers: { Authorization: "Bearer upload-secret" },
       }),
-      env,
     ).pipe(Effect.provide(ynabLiveLayer(env))),
   );
   assert.equal(response.status, 409);
