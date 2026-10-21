@@ -51,8 +51,13 @@ export function parseCsv(text: string, delimiter = detectDelimiter(text)): Parse
     const c = input[i];
     if (quoted) {
       if (c === '"') {
-        if (input[i + 1] === '"') { field += '"'; i++; }
-        else { quoted = false; justClosedQuote = true; }
+        if (input[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          quoted = false;
+          justClosedQuote = true;
+        }
       } else field += c;
     } else if (c === '"' && field === "" && !justClosedQuote) {
       quoted = true;
