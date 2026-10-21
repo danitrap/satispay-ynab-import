@@ -372,6 +372,18 @@ The tests use Node's built-in test runner. They cover wallet-only funding, mixed
 
 GitHub Actions runs the test suite, TypeScript checks, and Wrangler bundle checks on pull requests and pushes to `main`.
 
+### Local Effect source reference
+
+Use [vendor-cli](https://github.com/rawnly/vendor-cli) to keep the Effect source available locally for reference. Install the CLI with Homebrew, then restore the pinned sources:
+
+~~~bash
+brew install rawnly/tap/vendor
+vendor install --frozen
+vendor list
+~~~
+
+The sources are placed in `vendor/effect/`, pinned to `effect@4.0.5` to match this project's installed dependency. `vendors.json` records the source repository and tag; `vendors.lock` locks the exact commit. Commit both files when changing the reference version. The downloaded `vendor/` directory is ignored by Git. The application continues to use the npm dependency installed by `npm ci`.
+
 ### Cloudflare Preview environments
 
 The example Wrangler configuration includes a separate `[previews.vars]` block, with YNAB writes **disabled** and placeholder account IDs. These are deliberately fake Preview values, not production IDs. Cloudflare's `wrangler preview` expects its preview configuration to be explicit.

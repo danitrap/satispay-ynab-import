@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "vendors": {
+    "effect": {
+      "repo": "https://github.com/effect-ts/effect",
+      "ref": "effect@4.0.5",
+      "sha": "7f524e25cfb49a71ac39b0f44278d08d40dda5de",
+      "mode": "copy"
+    }
+  }
+}
