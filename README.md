@@ -58,6 +58,8 @@ Satispay .xlsx export
 
 Uploads are processed in memory. The Worker does not store transaction exports, and YNAB handles deduplication for previously imported IDs.
 
+The [domain glossary](GLOSSARY.md) defines the vocabulary for wallet accounting, import identity, transaction review and reconciliation.
+
 ## Quick start: from fork to first preview
 
 ### Requirements
