@@ -313,7 +313,10 @@ The code separates **pure financial calculations** from **effectful I/O**.
 ~~~text
 src/
 ├── config.ts          Request-scoped, lazily validated Cloudflare bindings
+├── domain.ts          Pure constructors for dates, identifiers and exact money units
+├── domain-schema.ts   Schema validation for branded boundary values
 ├── errors.ts          Tagged application failures and import diagnostics
+├── failure-message.ts Safe presentation of structured failure reasons
 ├── index.ts           Worker routes, authorization, bounded uploads
 ├── spreadsheet.ts     XLSX decoding and workbook inspection
 ├── csv.ts             CSV inspection
@@ -340,6 +343,8 @@ The Worker uses [Effect v4](https://effect.website/) throughout its asynchronous
 The domain modules stay independent of Effect. There is no global runtime holding Cloudflare request credentials; the live service Layer is provided per request.
 
 `requestLiveLayer` is the single composition root for each request. It provides one configuration module and the fetch transport, then builds the YNAB implementation, which closes over those dependencies. The router and import programs consume their declared requirements; `YnabServiceApi` describes public results and failures independently of the implementation. Type-level tests verify that public operations leave no infrastructure requirements for callers.
+
+Money units and identifiers have distinct branded types. Pure constructors check exact cents and safe milliunit conversions; unsafe movements are flagged for review, overflowing totals are rejected, and balance audits report unavailable when their arithmetic cannot remain exact. Schema validates calendar dates and target IDs at the request boundary. Failures carry structured reasons with safe, derived messages; only known plan-input errors are treated as invalid uploads, while unexpected planning exceptions remain defects.
 
 **No automatic retries of YNAB POST imports.** A response can be lost after YNAB accepts a request, so ambiguous results must be checked before retrying.
 

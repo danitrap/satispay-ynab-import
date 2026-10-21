@@ -1,3 +1,4 @@
+import { PlanInputError } from "./domain.ts";
 import { Effect } from "effect";
 import { AppConfig, type YnabEnv } from "./config.ts";
 import { buildImportPlan, summarizeImportPlan } from "./import-plan.ts";
@@ -16,11 +17,14 @@ export function processImportEffect(mode: ImportMode, bytes: ArrayBuffer) {
     const rows = yield* readSheetEffect(bytes);
     const plan = yield* Effect.try({
       try: () => buildImportPlan(rows, fromDate),
-      catch: (e) =>
-        new ImportPlanError({
-          message: e instanceof Error ? e.message : "Invalid Satispay import plan",
-        }),
-    });
+      catch: (error) => error,
+    }).pipe(
+      Effect.catch((error) =>
+        error instanceof PlanInputError
+          ? Effect.fail(new ImportPlanError({ reason: error.reason }))
+          : Effect.die(error),
+      ),
+    );
     const summary = summarizeImportPlan(plan);
     if (mode === "prepare") return { _tag: "ImportPrepared" as const, summary };
     if (plan.counts.rejected > 0) {

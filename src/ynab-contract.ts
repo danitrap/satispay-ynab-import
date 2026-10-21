@@ -1,9 +1,10 @@
+import type { YnabAccountId, YnabPlanId } from "./domain.ts";
 import type { Effect } from "effect";
 import type { YnabFailure } from "./errors.ts";
 import type { ImportPlan } from "./import-plan.ts";
 
 export type YnabAccount = {
-  readonly id: string;
+  readonly id: YnabAccountId;
   readonly name: string;
   readonly on_budget: boolean;
   readonly closed: boolean;
@@ -11,9 +12,9 @@ export type YnabAccount = {
 };
 export type YnabAccounts = {
   readonly matches: ReadonlyArray<{
-    readonly planId: string;
+    readonly planId: YnabPlanId;
     readonly planName: string;
-    readonly accountId: string;
+    readonly accountId: YnabAccountId;
     readonly accountName: string;
     readonly onBudget: boolean;
   }>;

@@ -1,6 +1,7 @@
+import { parseCents, makeCents, makeMilliunits, negateCents, type Cents } from "./domain.ts";
 import type { SheetCell } from "./spreadsheet.ts";
 
-type RefundResolution = { amountCents: number | null; issue?: string; adjusted?: boolean };
+type RefundResolution = { amountCents: Cents | null; issue?: string; adjusted?: boolean };
 type BalanceAudit = {
   status: "ok" | "mismatch" | "unavailable";
   expectedChangeMilliunits?: number;
@@ -10,11 +11,7 @@ type BalanceAudit = {
 };
 const text = (value: SheetCell): string =>
   value === null || value === undefined ? "" : String(value).trim();
-function cents(value: SheetCell): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  const n = Math.round(value * 100);
-  return Number.isSafeInteger(n) && Math.abs(value * 100 - n) < 0.0001 ? n : null;
-}
+const cents = parseCents;
 function time(value: SheetCell): number | null {
   if (value instanceof Date) return Number.isNaN(value.valueOf()) ? null : value.valueOf();
   const input = text(value);
@@ -109,7 +106,7 @@ export function analyzeLedger(rows: SheetCell[][]): {
       if (sum === null) return null;
       const raw = original[idx(name)];
       const value = !text(raw) ? 0 : cents(raw);
-      return value === null ? null : sum + value;
+      return value === null ? null : makeCents(sum + value);
     }, 0);
     // A fully refunded merchant purchase must have a consistent funding split.
     if (
@@ -122,7 +119,7 @@ export function analyzeLedger(rows: SheetCell[][]): {
       refundsUnresolved++;
       continue;
     }
-    const refundedCents = walletSpent === 0 ? 0 : -walletSpent;
+    const refundedCents = walletSpent === 0 ? makeCents(0)! : negateCents(walletSpent);
     resolved[i] = { amountCents: refundedCents, adjusted: refundedCents !== reported };
     if (refundedCents !== reported) refundsAdjusted++;
   }
@@ -139,7 +136,7 @@ export function analyzeLedger(rows: SheetCell[][]): {
     } else {
       const anchors = records
         .map((row, index) => ({ index, balance: cents(row[saldo]) }))
-        .filter((a): a is { index: number; balance: number } => a.balance !== null);
+        .filter((a): a is { index: number; balance: Cents } => a.balance !== null);
       if (anchors.length >= 2) {
         const recent = anchors[0],
           oldest = anchors[anchors.length - 1];
@@ -149,14 +146,23 @@ export function analyzeLedger(rows: SheetCell[][]): {
           balanceCheck = { status: "unavailable", reason: "unresolved_or_invalid_wallet_amount" };
         } else {
           const expected = recent.balance - oldest.balance;
-          const calculated = considered.reduce((sum, r) => sum + (r.amountCents ?? 0), 0);
+          let calculated = 0;
+          let safe = true;
+          for (const row of considered) {
+            calculated += row.amountCents ?? 0;
+            if (!Number.isSafeInteger(calculated)) safe = false;
+          }
           const discrepancy = expected - calculated;
-          balanceCheck = {
-            status: discrepancy === 0 ? "ok" : "mismatch",
-            expectedChangeMilliunits: expected * 10,
-            calculatedChangeMilliunits: calculated * 10,
-            discrepancyMilliunits: discrepancy * 10,
-          };
+          const values = [expected * 10, calculated * 10, discrepancy * 10];
+          balanceCheck =
+            safe && values.every((value) => makeMilliunits(value) !== null)
+              ? {
+                  status: discrepancy === 0 ? "ok" : "mismatch",
+                  expectedChangeMilliunits: expected * 10,
+                  calculatedChangeMilliunits: calculated * 10,
+                  discrepancyMilliunits: discrepancy * 10,
+                }
+              : { status: "unavailable", reason: "unsafe_money_range" };
         }
       }
     }
