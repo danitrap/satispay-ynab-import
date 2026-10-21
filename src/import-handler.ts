@@ -39,9 +39,7 @@ export const processImportEffect = Effect.fn("satispay.import")(function* (
     );
   }
   const result = yield* importPlanEffect(plan).pipe(
-    Effect.mapError(
-      (reason) => new ImportFailedError({ summary, reason, message: reason.message }),
-    ),
+    Effect.mapError((reason) => new ImportFailedError({ summary, reason })),
   );
   return { _tag: "ImportCompleted" as const, summary, result };
 }, observeOperation("import"));

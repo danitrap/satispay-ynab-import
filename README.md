@@ -320,6 +320,7 @@ src/
 ├── telemetry.ts       Operation timing and bounded outcome counters
 ├── index.ts           Worker routes, authorization, bounded uploads
 ├── spreadsheet.ts     XLSX decoding and workbook inspection
+├── workbook-reader.ts Injectable external XLSX decoder
 ├── csv.ts             CSV inspection
 ├── ledger.ts          Pure refund resolution and balance auditing
 ├── preview.ts         Pure whole-export classification and summaries
@@ -344,6 +345,8 @@ The Worker uses [Effect v4](https://effect.website/) throughout its asynchronous
 The domain modules stay independent of Effect. There is no global runtime holding Cloudflare request credentials; the live service Layer is provided per request.
 
 `requestLiveLayer` is the single composition root for each request. It provides one configuration module and the fetch transport, then builds the YNAB implementation, which closes over those dependencies. The router and import programs consume their declared requirements; `YnabServiceApi` describes public results and failures independently of the implementation. Type-level tests verify that public operations leave no infrastructure requirements for callers.
+
+Account discovery, target validation and imports declare separate failure types. Uncertain HTTP writes always carry a status, and an import reuses the target configuration it validated. Workbook analysis maps declared input errors to HTTP 422 while preserving unexpected exceptions as defects. The external XLSX decoder is injectable through `WorkbookReader` for testing both paths.
 
 Money units and identifiers have distinct branded types. Pure constructors check exact cents and safe milliunit conversions; unsafe movements are flagged for review, overflowing totals are rejected, and balance audits report unavailable when their arithmetic cannot remain exact. Schema validates calendar dates and target IDs at the request boundary. Failures carry structured reasons with safe, derived messages; only known plan-input errors are treated as invalid uploads, while unexpected planning exceptions remain defects.
 

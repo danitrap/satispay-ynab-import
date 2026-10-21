@@ -41,14 +41,15 @@ export function failureMessage(
         Accounts: "Cannot list YNAB accounts",
       }[error.reason];
     case "YnabImportUncertainError":
+      if (error.reason._tag === "Http")
+        return `YNAB API HTTP ${error.reason.status}. Check import status before repeating.`;
       return {
         Network: "YNAB network error. Check import status before repeating.",
         Timeout: "YNAB request timed out. Check import status before repeating.",
-        Http: `YNAB API HTTP ${error.status}. Check import status before repeating.`,
         Json: "YNAB returned unexpected JSON. Check import status before repeating.",
         Contract: "Unexpected YNAB response: verify results in YNAB before retrying",
         DuplicateCount:
           "Unexpected YNAB duplicate import count: verify results in YNAB before retrying",
-      }[error.reason];
+      }[error.reason._tag];
   }
 }

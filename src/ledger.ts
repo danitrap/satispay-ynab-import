@@ -1,4 +1,11 @@
-import { parseCents, makeCents, makeMilliunits, negateCents, type Cents } from "./domain.ts";
+import {
+  parseCents,
+  makeCents,
+  makeMilliunits,
+  negateCents,
+  WorksheetInputError,
+  type Cents,
+} from "./domain.ts";
 import type { SheetCell } from "./spreadsheet.ts";
 
 type RefundResolution = { amountCents: Cents | null; issue?: string; adjusted?: boolean };
@@ -32,12 +39,11 @@ export function analyzeLedger(rows: SheetCell[][]): {
   refundsUnresolved: number;
   balanceCheck: BalanceAudit;
 } {
-  if (!rows.length) throw new Error("Empty worksheet");
+  if (!rows.length) throw new WorksheetInputError("EmptyWorksheet");
   const cols = rows[0].map(text);
   const idx = (name: string) => cols.indexOf(name);
   const needed = ["Data", "Nome", "Importo", "Tipo", "Stato", "Disponibilità"];
-  if (needed.some((name) => idx(name) < 0))
-    throw new Error("Missing Satispay columns for ledger analysis");
+  if (needed.some((name) => idx(name) < 0)) throw new WorksheetInputError("MissingColumns");
   const records = rows.slice(1).filter((row) => row.some((v) => text(v) !== ""));
   const amounts = records.map((row) => cents(row[idx("Disponibilità")]));
   const invalidValue = records.map(

@@ -1,3 +1,5 @@
+import { PlanInputError, WorksheetInputError } from "./domain.ts";
+import { WorkbookReader } from "./workbook-reader.ts";
 import { observeOperation } from "./telemetry.ts";
 import { Data, Effect } from "effect";
 import { previewSatispay } from "./preview.ts";
@@ -73,9 +75,9 @@ function groupedCounts(values: SheetCell[]) {
 }
 export function summarizeSheet(rows: SheetCell[][]) {
   const nonEmpty = rows.filter((row) => row.some(present));
-  if (!nonEmpty.length) throw new Error("Empty worksheet");
+  if (!nonEmpty.length) throw new WorksheetInputError("EmptyWorksheet");
   const [header, ...body] = nonEmpty;
-  if (header.length < 2) throw new Error("Expected at least two columns");
+  if (header.length < 2) throw new WorksheetInputError("InsufficientColumns");
   const columns = header.map((value, index) => String(value ?? `Column ${index + 1}`));
   const position = (name: string) =>
     columns.findIndex(
@@ -128,23 +130,27 @@ export class WorkbookError extends Data.TaggedError("WorkbookError")<{ readonly 
 }
 
 /** Untrusted xlsx decoding happens at the I/O boundary, errors remain typed. */
-export const readSheetEffect = Effect.fn("satispay.workbook")((file: ArrayBuffer) =>
-  Effect.tryPromise({
-    try: async () => {
-      const { readSheet } = await import("read-excel-file/universal");
-      return (await readSheet(file)) as unknown as SheetCell[][];
-    },
+export const readSheetEffect = Effect.fn("satispay.workbook")(function* (file: ArrayBuffer) {
+  const reader = yield* WorkbookReader;
+  return yield* Effect.tryPromise({
+    try: () => reader.read(file),
     catch: () => new WorkbookError("Cannot parse XLSX workbook. Check the exported Excel file."),
-  }).pipe(observeOperation("workbook")),
-);
+  });
+}, observeOperation("workbook"));
+
+/** Normalize only declared input errors; preserve the identity of unexpected defects. */
+const analysisFailure = (error: unknown) =>
+  error instanceof WorksheetInputError || error instanceof PlanInputError
+    ? Effect.fail(new WorkbookError("Cannot parse XLSX workbook. Check the exported Excel file."))
+    : Effect.die(error);
+
 export const inspectXlsxEffect = (file: ArrayBuffer) =>
   readSheetEffect(file).pipe(
     Effect.flatMap((rows) =>
       Effect.try({
         try: () => summarizeSheet(rows),
-        catch: () =>
-          new WorkbookError("Cannot parse XLSX workbook. Check the exported Excel file."),
-      }),
+        catch: (error) => error,
+      }).pipe(Effect.catch(analysisFailure)),
     ),
   );
 export const previewXlsxEffect = (file: ArrayBuffer) =>
@@ -152,8 +158,7 @@ export const previewXlsxEffect = (file: ArrayBuffer) =>
     Effect.flatMap((rows) =>
       Effect.try({
         try: () => previewSatispay(rows),
-        catch: () =>
-          new WorkbookError("Cannot parse XLSX workbook. Check the exported Excel file."),
-      }),
+        catch: (error) => error,
+      }).pipe(Effect.catch(analysisFailure)),
     ),
   );

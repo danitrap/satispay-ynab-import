@@ -1,3 +1,4 @@
+import { workbookReaderLayer } from "../src/workbook-reader.ts";
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Effect } from "effect";
@@ -32,7 +33,9 @@ test("Effect SHA-256 import ids preserve deterministic legacy form", async () =>
 });
 test("invalid Excel produces typed WorkbookError", async () => {
   const result = await Effect.runPromiseExit(
-    readSheetEffect(new TextEncoder().encode("not a workbook").buffer),
+    readSheetEffect(new TextEncoder().encode("not a workbook").buffer).pipe(
+      Effect.provide(workbookReaderLayer),
+    ),
   );
   assert.equal(result._tag, "Failure");
 });

@@ -3,7 +3,7 @@ import { YnabAccountIdSchema, YnabPlanIdSchema } from "./domain-schema.ts";
 import type { SatispayTransactionId, YnabAccountId } from "./domain.ts";
 import type { YnabAccounts } from "./ynab-contract.ts";
 import { Effect, Redacted, Schema, Schedule } from "effect";
-import { AppConfig } from "./config.ts";
+import { AppConfig, type YnabTarget } from "./config.ts";
 import type { YnabServiceApi } from "./ynab-contract.ts";
 export type { YnabEnv } from "./config.ts";
 import {
@@ -84,93 +84,88 @@ export function buildYnabTransactionsEffect(
 export const makeYnabClient = Effect.gen(function* () {
   const http = HttpClient.withScope(yield* HttpClient.HttpClient);
   const config = yield* AppConfig;
-  /** One Effect for transport, HTTP status and response decoding; errors are typed. */
-  function apiEffect(path: string, token: string, method: "GET" | "POST" = "GET", body?: unknown) {
-    const responseError = () =>
-      method === "POST"
-        ? new YnabImportUncertainError({
-            reason: "Json",
-          })
-        : new YnabResponseError({ reason: "Json" });
-    const execute = Effect.gen(function* () {
-      const url = "https://api.ynab.com/v1" + path;
-      const initial = (
-        method === "POST" ? HttpClientRequest.post(url) : HttpClientRequest.get(url)
-      ).pipe(
-        HttpClientRequest.setHeader("Authorization", "Bearer " + token),
-        HttpClientRequest.acceptJson,
-      );
-      const request =
-        body === undefined
-          ? initial
-          : yield* HttpClientRequest.bodyJson(initial, body).pipe(
-              Effect.mapError(() => new YnabError("Cannot encode YNAB request")),
-            );
-      const res = yield* http.execute(request).pipe(
-        Effect.mapError(() =>
-          method === "POST"
-            ? new YnabImportUncertainError({
-                reason: "Network",
-              })
-            : new YnabTransportError({ reason: "Network" }),
-        ),
-      );
-      if (res.status < 200 || res.status >= 300) {
-        return yield* Effect.fail(
-          method === "POST" && res.status >= 500
-            ? new YnabImportUncertainError({
-                reason: "Http",
-                status: res.status,
-              })
-            : new YnabHttpError({
-                status: res.status,
-                message: "YNAB API HTTP " + res.status + ". Check your plan, account and token.",
-              }),
+  const apiRequest = (path: string, token: string, method: "GET" | "POST") => {
+    const url = "https://api.ynab.com/v1" + path;
+    return (method === "GET" ? HttpClientRequest.get(url) : HttpClientRequest.post(url)).pipe(
+      HttpClientRequest.setHeader("Authorization", "Bearer " + token),
+      HttpClientRequest.acceptJson,
+    );
+  };
+
+  /** Request lifetime includes response decoding. Read/write policy stays at the caller. */
+  function apiEffect(request: HttpClientRequest.HttpClientRequest) {
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const res = yield* http
+          .execute(request)
+          .pipe(Effect.mapError(() => new YnabTransportError({ reason: "Network" })));
+        if (res.status < 200 || res.status >= 300)
+          return yield* Effect.fail(
+            new YnabHttpError({
+              status: res.status,
+              message: "YNAB API HTTP " + res.status + ". Check your plan, account and token.",
+            }),
+          );
+        const parsed: unknown = yield* res.json.pipe(
+          Effect.mapError(() => new YnabResponseError({ reason: "Json" })),
         );
-      }
-      const parsed: unknown = yield* res.json.pipe(Effect.mapError(responseError));
-      if (!parsed || typeof parsed !== "object" || !("data" in parsed) || !parsed.data) {
-        return yield* Effect.fail(responseError());
-      }
-      return parsed.data;
-    });
-    const attempt = Effect.scoped(execute).pipe(
+        if (!parsed || typeof parsed !== "object" || !("data" in parsed) || !parsed.data) {
+          return yield* Effect.fail(new YnabResponseError({ reason: "Json" }));
+        }
+        return parsed.data;
+      }),
+    ).pipe(
       Effect.timeoutOrElse({
         duration: "10 seconds",
-        orElse: () =>
-          Effect.fail(
-            method === "POST"
-              ? new YnabImportUncertainError({ reason: "Timeout" })
-              : new YnabTransportError({ reason: "Timeout" }),
-          ),
+        orElse: () => Effect.fail(new YnabTransportError({ reason: "Timeout" })),
       }),
-      observeOperation(method === "GET" ? "ynab.read" : "ynab.write"),
+      observeOperation(request.method === "GET" ? "ynab.read" : "ynab.write"),
     );
-    return method === "POST"
-      ? attempt
-      : attempt.pipe(
-          Effect.retry({
-            times: 2,
-            schedule: Schedule.exponential("200 millis"),
-            while: (error) =>
-              error._tag === "YnabTransportError" ||
-              (error._tag === "YnabHttpError" && [502, 503, 504].includes(error.status)),
-          }),
-        );
   }
+
+  const readApiEffect = (path: string, token: string) =>
+    apiEffect(apiRequest(path, token, "GET")).pipe(
+      Effect.retry({
+        times: 2,
+        schedule: Schedule.exponential("200 millis"),
+        while: (error) =>
+          error._tag === "YnabTransportError" ||
+          (error._tag === "YnabHttpError" && [502, 503, 504].includes(error.status)),
+      }),
+    );
+
+  const postApiEffect = (path: string, token: string, body: unknown) =>
+    Effect.gen(function* () {
+      const request = yield* HttpClientRequest.bodyJson(apiRequest(path, token, "POST"), body).pipe(
+        Effect.mapError(() => new YnabError("Cannot encode YNAB request")),
+      );
+      return yield* apiEffect(request).pipe(
+        Effect.mapError((error) => {
+          switch (error._tag) {
+            case "YnabTransportError":
+              return new YnabImportUncertainError({ reason: { _tag: error.reason } });
+            case "YnabResponseError":
+              return new YnabImportUncertainError({ reason: { _tag: "Json" } });
+            case "YnabHttpError":
+              return error.status >= 500
+                ? new YnabImportUncertainError({ reason: { _tag: "Http", status: error.status } })
+                : error;
+          }
+        }),
+      );
+    });
 
   const findSatispayAccountsEffect = Effect.fn("satispay.ynab.findAccounts")(function* () {
     const token = Redacted.value(yield* config.token);
-    const rawPlans = yield* apiEffect("/plans", token, "GET");
+    const rawPlans = yield* readApiEffect("/plans", token);
     const { plans } = yield* Schema.decodeUnknownEffect(PlansSchema)(rawPlans).pipe(
       Effect.mapError(() => new YnabResponseError({ reason: "Plans" })),
     );
     const matches: Array<YnabAccounts["matches"][number]> = [];
     for (const plan of plans.slice(0, 20)) {
-      const rawAccounts = yield* apiEffect(
+      const rawAccounts = yield* readApiEffect(
         "/plans/" + encodeURIComponent(plan.id) + "/accounts",
         token,
-        "GET",
       );
       const { accounts } = yield* Schema.decodeUnknownEffect(AccountsSchema)(rawAccounts).pipe(
         Effect.mapError(() => new YnabResponseError({ reason: "Accounts" })),
@@ -194,16 +189,16 @@ export const makeYnabClient = Effect.gen(function* () {
     return { matches };
   });
 
-  const validateTargetAccountEffect = Effect.fn("satispay.ynab.validateAccount")(function* () {
-    const target = yield* config.target;
+  const validateTargetAccountEffect = Effect.fn("satispay.ynab.validateAccount")(function* (
+    target: YnabTarget,
+  ) {
     const token = Redacted.value(target.token);
-    const rawAccount = yield* apiEffect(
+    const rawAccount = yield* readApiEffect(
       "/plans/" +
         encodeURIComponent(target.planId) +
         "/accounts/" +
         encodeURIComponent(target.accountId),
       token,
-      "GET",
     );
     const { account } = yield* Schema.decodeUnknownEffect(AccountResponseSchema)(rawAccount).pipe(
       Effect.mapError(
@@ -244,23 +239,22 @@ export const makeYnabClient = Effect.gen(function* () {
       );
     if (plan.candidates.length > 100)
       return yield* Effect.fail(new YnabImportRejectedError({ reason: "BatchTooLarge" }));
-    yield* validateTargetAccountEffect();
+    const target = yield* config.target;
+    yield* validateTargetAccountEffect(target);
     if (!plan.candidates.length)
       return { submitted: 0, processed: 0, duplicateImports: 0, ynabReportedTransactionIds: 0 };
-    const target = yield* config.target;
     const transactions = yield* buildYnabTransactionsEffect(plan.candidates, target.accountId);
     const token = Redacted.value(target.token);
-    const rawResult = yield* apiEffect(
+    const rawResult = yield* postApiEffect(
       "/plans/" + encodeURIComponent(target.planId) + "/transactions",
       token,
-      "POST",
       { transactions },
     );
     const data = yield* Schema.decodeUnknownEffect(ImportResultSchema)(rawResult).pipe(
       Effect.mapError(
         () =>
           new YnabImportUncertainError({
-            reason: "Contract",
+            reason: { _tag: "Contract" },
           }),
       ),
     );
@@ -269,7 +263,7 @@ export const makeYnabClient = Effect.gen(function* () {
     if (duplicateImports > submitted)
       return yield* Effect.fail(
         new YnabImportUncertainError({
-          reason: "DuplicateCount",
+          reason: { _tag: "DuplicateCount" },
         }),
       );
     return {
@@ -282,7 +276,7 @@ export const makeYnabClient = Effect.gen(function* () {
 
   return {
     findAccounts: findSatispayAccountsEffect(),
-    validateAccount: validateTargetAccountEffect(),
+    validateAccount: Effect.flatMap(config.target, validateTargetAccountEffect),
     importPlan: sendToYnabEffect,
   } satisfies YnabServiceApi;
 });

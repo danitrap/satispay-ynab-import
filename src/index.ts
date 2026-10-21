@@ -305,14 +305,9 @@ export function handleRequestEffect(request: Request) {
             ynabFailureStatus(error.reason),
           ),
         ),
-      YnabWriteDisabledError: ynabFailureResponse,
-      YnabImportRejectedError: ynabFailureResponse,
-      YnabAccountError: ynabFailureResponse,
-      YnabError: ynabFailureResponse,
       YnabTransportError: ynabFailureResponse,
       YnabHttpError: ynabFailureResponse,
       YnabResponseError: ynabFailureResponse,
-      YnabImportUncertainError: ynabFailureResponse,
     }),
   );
 }

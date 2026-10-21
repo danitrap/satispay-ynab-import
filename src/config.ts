@@ -67,6 +67,8 @@ function makeConfig(env: AppEnv) {
   };
 }
 
+export type YnabTarget = Effect.Success<ReturnType<typeof makeConfig>["target"]>;
+
 /** Values are decoded lazily: inspection and health never require YNAB credentials. */
 export class AppConfig extends Context.Service<AppConfig, ReturnType<typeof makeConfig>>()(
   "satispay/AppConfig",
