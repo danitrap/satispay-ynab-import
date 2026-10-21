@@ -3,6 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 workers_dev = true
 
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 # Non-secret deployment settings live in Git. Keep production values
 # for YNAB_WRITE_ENABLED and YNAB_IMPORT_FROM unchanged.
 [vars]

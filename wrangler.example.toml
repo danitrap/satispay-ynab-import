@@ -4,6 +4,10 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 workers_dev = true
 
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 # Safe defaults. Configure UPLOAD_TOKEN, YNAB_TOKEN, YNAB_PLAN_ID,
 # and YNAB_ACCOUNT_ID as Worker Secrets (or in local .dev.vars).
 [vars]

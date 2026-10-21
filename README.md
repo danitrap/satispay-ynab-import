@@ -151,6 +151,18 @@ npm run deploy
 
 For Cloudflare Git-connected deployments, use **`npx wrangler deploy`** as the deploy command. Wrangler handles the TypeScript bundle; there is no separate build output directory to configure. Wrangler preserves existing Worker Secrets on normal deployments, even when those Secret names are absent from `wrangler.toml`. The non-secret `[vars]` values are still controlled by the file.
 
+Workers Logs is enabled in both Wrangler configurations at 100% request sampling.
+After deployment, view logs in Cloudflare → Workers & Pages → your Worker → Observability.
+Completed instrumented operations (`upload`, `workbook`, `import`, `ynab.read`, and
+`ynab.write`) emit structured Effect logs with `message.event = "satispay.operation"`,
+`message.operation`, `message.outcome` (`success` or `failure`), and `message.durationMs`.
+Durations use a monotonic clock; failures include defects and interruptions. Operation
+logs never include inputs, results, error payloads, transaction details, or credentials.
+Cloudflare also records invocation metadata independently of these application logs.
+Effect counters and histograms remain in memory; they are not exported as Cloudflare metrics.
+See [Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)
+for sampling, retention, and pricing.
+
 ### 4. Preview an export
 
 Use your local URL (`http://localhost:8787`) or a deployed Worker:

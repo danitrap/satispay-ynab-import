@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { Clock, Effect, Fiber, Metric } from "effect";
-import { TestClock } from "effect/testing";
+import { Clock, Effect, Fiber, Logger, Metric } from "effect";
+import { TestClock, TestConsole } from "effect/testing";
 import { findAccountsEffect, importPlanEffect, requestLiveLayer } from "../src/ynab-service.ts";
 import worker, { handleRequestEffect } from "../src/index.ts";
 import { operationCount, operationDuration, observeOperation } from "../src/telemetry.ts";
@@ -272,6 +272,8 @@ test("telemetry records only bounded operation/outcome labels and elapsed durati
 
 test("telemetry uses monotonic duration and records failures, defects and interruptions", async () => {
   const registry = new Map();
+  const logs = [];
+  const logger = Logger.make((options) => logs.push(options));
   const baseClock = Effect.runSync(Clock.Clock);
   let wall = 1_000_000_000n;
   let monotonic = 0n;
@@ -279,13 +281,15 @@ test("telemetry uses monotonic duration and records failures, defects and interr
     ...baseClock,
     currentTimeNanosUnsafe: () => wall,
     currentTimeNanos: Effect.sync(() => wall),
+    currentTimeMillisUnsafe: () => Number(wall) / 1_000_000,
+    currentTimeMillis: Effect.sync(() => Number(wall) / 1_000_000),
     monotonicTimeNanosUnsafe: () => monotonic,
     monotonicTimeNanos: Effect.sync(() => monotonic),
   };
   for (const outcome of [
-    Effect.void,
-    Effect.fail("expected"),
-    Effect.die("bug"),
+    Effect.succeed({ secret: "private-result" }),
+    Effect.fail({ secret: "private-failure" }),
+    Effect.die({ secret: "private-defect" }),
     Effect.interrupt,
   ]) {
     await Effect.runPromiseExit(
@@ -299,9 +303,17 @@ test("telemetry uses monotonic duration and records failures, defects and interr
         observeOperation("upload"),
         Effect.provideService(Clock.Clock, clock),
         Effect.provideService(Metric.MetricRegistry, registry),
+        Effect.provide(Logger.layer([logger])),
       ),
     );
   }
+  assert.deepEqual(
+    logs.map((log) => log.message),
+    ["success", "failure", "failure", "failure"].map((outcome) => [
+      { event: "satispay.operation", operation: "upload", outcome, durationMs: 25 },
+    ]),
+  );
+  assert.ok(logs.every((log) => log.cause.reasons.length === 0));
   await Effect.runPromise(
     Effect.gen(function* () {
       const duration = yield* Metric.value(
@@ -319,6 +331,39 @@ test("telemetry uses monotonic duration and records failures, defects and interr
       assert.equal(successes.count, 1);
     }).pipe(Effect.provideService(Metric.MetricRegistry, registry)),
   );
+});
+
+test("request composition emits structured console logs without upload contents or secrets", async () => {
+  const logs = await Effect.runPromise(
+    Effect.gen(function* () {
+      const response = yield* handleRequestEffect(
+        new Request("https://local.invalid/inspect", {
+          method: "POST",
+          headers: { Authorization: "Bearer upload" },
+          body: "name,amount\nprivate-payee,12.34\n",
+        }),
+      ).pipe(Effect.provide(requestLiveLayer(env)));
+      assert.equal(response.status, 200);
+      return yield* TestConsole.logLines;
+    }).pipe(Effect.provide(TestConsole.layer)),
+  );
+  assert.equal(logs.length, 1);
+  const log = logs[0];
+  assert.equal(log.level, "INFO");
+  assert.deepEqual(Object.keys(log.message).sort(), [
+    "durationMs",
+    "event",
+    "operation",
+    "outcome",
+  ]);
+  assert.equal(log.message.event, "satispay.operation");
+  assert.equal(log.message.operation, "upload");
+  assert.equal(log.message.outcome, "success");
+  assert.ok(Number.isFinite(log.message.durationMs) && log.message.durationMs >= 0);
+  assert.equal(log.cause, undefined);
+  for (const secret of ["private-payee", "12.34", "Bearer", env.YNAB_TOKEN]) {
+    assert.equal(JSON.stringify(logs).includes(secret), false);
+  }
 });
 
 test("malformed YNAB envelopes and payloads keep read and uncertain write failures without retries", async () => {
