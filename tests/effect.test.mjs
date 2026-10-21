@@ -172,6 +172,10 @@ test("Effect import response distinguishes matched IDs from actual imported move
     processed: 1,
     duplicateImports: 0,
     ynabReportedTransactionIds: 2,
+    confirmed: 1,
+    uncertain: 0,
+    failed: 0,
+    notAttempted: 0,
   });
 });
 test("Effect preserves input ordering when hashing imported IDs concurrently", async () => {
@@ -231,7 +235,9 @@ test("a lost POST response is a typed uncertain import and is never retried", as
       Effect.flip,
     ),
   );
-  assert.equal(error._tag, "YnabImportUncertainError");
+  assert.equal(error._tag, "YnabImportBatchError");
+  assert.equal(error.reason._tag, "YnabImportUncertainError");
+  assert.equal(error.progress.uncertain, 1);
   assert.match(error.message, /verify|Check import status/i);
   assert.equal(error.message.includes("transport details"), false);
   assert.equal(writes, 1);

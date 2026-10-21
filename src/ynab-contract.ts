@@ -24,6 +24,10 @@ export type YnabImportResult = {
   readonly processed: number;
   readonly duplicateImports: number;
   readonly ynabReportedTransactionIds: number;
+  readonly confirmed: number;
+  readonly uncertain: number;
+  readonly failed: number;
+  readonly notAttempted: number;
 };
 
 /** Implementations close over their dependencies; callers only need this contract. */

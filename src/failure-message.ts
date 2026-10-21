@@ -29,9 +29,7 @@ export function failureMessage(
     case "YnabAccountError":
       return "Target must be an active on-budget account named Satispay";
     case "YnabImportRejectedError":
-      return error.reason === "BatchTooLarge"
-        ? "Over 100 movements: use a shorter export"
-        : "Ambiguous transactions found: no YNAB writes performed";
+      return "Over 10,000 import candidates: use a shorter export";
     case "YnabTransportError":
       return error.reason === "Timeout" ? "YNAB request timed out." : "YNAB network error.";
     case "YnabResponseError":

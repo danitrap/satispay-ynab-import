@@ -18,7 +18,9 @@ No scraping, scheduled access to your Satispay account, database, or continuousl
 
 - **Wallet-first accounting:** import the cash portion of a movement, regardless of its Satispay transaction type.
 - **Benefit-aware:** exclude meal-voucher and other benefit balances from your cash-wallet account.
-- **Mixed-refund handling:** match merchant refunds against their original purchases and avoid overstating the cash portion.
+- **Mixed-refund handling:** reconstruct the wallet portion when possible; import unresolved refunds provisionally for review in YNAB.
+- **Review in YNAB:** orange flags and explanatory memos distinguish provisional amounts; unusable rows do not block valid movements.
+- **Large imports:** up to 10,000 candidates, sent in sequential batches of 500, entirely in memory.
 - **Safe previews:** inspect file structure, summarize all movements, or simulate your next import before writing anything.
 - **Deterministic deduplication:** derive YNAB import IDs from stable Satispay transaction identifiers.
 - **Balance diagnostics:** compare movements with the export's available balance snapshots.
@@ -207,7 +209,11 @@ Create a Shortcut that **accepts files from the Share Sheet** and uses **Get Con
 
 Don't select JSON or Form as the request body, and don't manually set a multipart boundary.
 
-Read the JSON response with **Get Dictionary Value**: if `ok` is true, show `processed` and `duplicateImports`; otherwise, display `error`. Optionally open the YNAB app afterwards.
+Read the JSON response with **Get Dictionary Value**: if `ok` is true, show `processed`, `duplicateImports`, `provisional` and `rejected`. For example: “Processed 42; duplicates 8; provisional candidates 2; excluded rows 1.” Open YNAB to find orange-flagged transactions and follow their review memos. The review counts describe the uploaded candidates, including any already imported ones; they do not read the current review status from YNAB.
+
+If the Shortcut receives an error response, display `error` and, when available, `confirmed`, `uncertain`, `failed` and `notAttempted`. Earlier batches may already have succeeded. If the Shortcut stops with a network error or never receives a final response, inspect YNAB before resubmitting. Stable import IDs let YNAB recognize previously imported movements, but the overall import is not atomic.
+
+The Shortcut keeps its HTTP request open during the import. There is no background job, stored export, or recoverable job status. Large imports can take longer; keep the Shortcut active and connected until it receives the result. Optionally open the YNAB app afterwards.
 
 **Treat the Shortcut as a secret** if it includes `UPLOAD_TOKEN`. Do not publish a copy with your token embedded.
 
@@ -226,13 +232,13 @@ All responses are JSON. Every endpoint except `GET /health` requires `Authorizat
 
 `/inspect` accepts `.xlsx` and CSV. The other upload endpoints accept `.xlsx` only. Upload a raw file body (recommended) or a multipart file in the field `file`.
 
-**Limits:** 4 MB per file, 4.5 MB per request, and at most **100 import candidates per batch**. Old binary `.xls` files are not supported.
+**Limits:** 4 MB per file, 4.5 MB per request, and at most **10,000 import candidates per import**, sent in sequential batches of **500**. Historical and excluded rows do not count toward the candidate limit, but still count toward the file size. Old binary `.xls` files are not supported.
 
 `/import` also requires `X-Confirm-Import: yes` and `YNAB_WRITE_ENABLED = "true"`. It checks that the destination account is active, on-budget, and named Satispay before writing.
 
 Configuration is validated only when an operation needs it. `/health` needs no credentials; `/inspect` and `/preview` need only `UPLOAD_TOKEN`; `/prepare` also needs a real calendar date in `YNAB_IMPORT_FROM`. Account discovery needs `YNAB_TOKEN`, and imports additionally need target plan/account IDs and an enabled write switch. An absent write switch defaults to disabled; its accepted values are exactly `"true"` and `"false"`.
 
-Authenticated configuration failures return HTTP **409**, disabled writes return **403**, and invalid workbooks, blocked movements or unsuitable destination accounts return **422**. YNAB transport/response failures return **502**. Import failures retain their existing `mode`, summary and `error` fields. If the POST outcome is uncertain, the error asks you to verify the import in YNAB before repeating it.
+Authenticated configuration failures return HTTP **409**, disabled writes return **403**, and invalid workbooks, oversized candidate sets or unsuitable destination accounts return **422**. YNAB transport/response failures return **502**. Unusable individual rows are excluded and reported without blocking the remaining candidates. Import failures retain their existing `mode`, summary and `error` fields. If the POST outcome is uncertain, the error asks you to verify the import in YNAB before repeating it.
 
 ### Reading the result
 
@@ -244,6 +250,12 @@ Authenticated configuration failures return HTTP **409**, disabled writes return
   "submitted": 2,
   "processed": 1,
   "duplicateImports": 1,
+  "confirmed": 2,
+  "uncertain": 0,
+  "failed": 0,
+  "notAttempted": 0,
+  "provisional": 1,
+  "rejected": 0,
   "ynabReportedTransactionIds": 1
 }
 ~~~
@@ -252,19 +264,27 @@ Authenticated configuration failures return HTTP **409**, disabled writes return
 
 | Field | Meaning |
 | --- | --- |
-| `eligible` | Valid, cutoff-eligible movements selected from the workbook |
+| `eligible` | Cutoff-eligible candidates, including provisional transactions |
 | `submitted` | Number of transactions sent to YNAB |
 | `duplicateImports` | Import IDs YNAB reports as already imported |
-| `processed` | Submitted minus duplicates; **may include transactions matched to existing YNAB entries** |
+| `processed` | Confirmed candidates minus confirmed duplicates; **may include transactions matched to existing YNAB entries** |
 | `imported` | Backward-compatible alias for `processed`, **not** a count of newly created YNAB rows |
 | `ynabReportedTransactionIds` | Number of YNAB transaction IDs returned; can exceed `submitted` due to matching |
-| `rejected` / `issues` | Invalid or unresolved movements blocking a write |
+| `confirmed` | Candidates in batches with a confirmed successful response, including duplicates |
+| `uncertain` | Candidates in the batch whose write outcome could not be confirmed |
+| `failed` | Candidates in a batch rejected by YNAB with a definitive error |
+| `notAttempted` | Candidates not yet submitted when the import stopped |
+| `provisional` / `reviewIssues` | Candidates carrying a provisional wallet amount, grouped by reason |
+| `requiresReview` | Provisional candidates plus excluded rows requiring attention |
+| `rejected` / `issues` | Unusable or unapproved movements excluded from the import, grouped by reason |
 | `refundsAdjusted` | Refunds corrected to reflect the original wallet-funded amount |
 | `refundsUnresolved` | Refunds that could not be matched safely |
 | `balanceCheck` | Balance reconciliation diagnostics (`ok`, `mismatch`, or `unavailable`) |
 | `inflowMilliunits` / `outflowMilliunits` / `netMilliunits` | Aggregate amounts in YNAB milliunits (EUR 1 = 1,000 milliunits) |
 
 The YNAB API does not reliably distinguish **newly created** transactions from **matched** ones using the `processed` count alone.
+
+On a batch failure, `processed`, `duplicateImports` and `confirmed` retain only previously confirmed results. The importer stops without attempting later batches or retrying the failed POST. `submitted = confirmed + uncertain + failed`, and `eligible = submitted + notAttempted` when batch progress is available. These counters are returned with the response and are not persisted if the connection is lost.
 
 ## Accounting rules
 
@@ -282,7 +302,7 @@ The importer tracks **cash wallet availability**, using the Italian `Disponibili
 
 Movement types do **not** determine whether a transaction is included or considered a transfer. If `Nome` (payee) is absent or `-`, a descriptive `Satispay — <type>` fallback is used.
 
-The importer enforces valid dates, approved status (`✅ Approvato`), unique **textual** Satispay IDs and cent-exact wallet amounts. Invalid in-scope rows prevent the batch from being written.
+The importer enforces valid dates, approved Satispay status (`✅ Approvato`), unique **textual** Satispay IDs and cent-exact wallet amounts. Invalid in-scope rows are excluded and counted in `rejected` and `issues`; other eligible movements proceed. An unreadable workbook or missing required columns still prevents planning the import.
 
 ### Mixed-funding refunds
 
@@ -296,7 +316,11 @@ For a `🔄 Rimborso` row, the importer looks for **exactly one** original `🏬
 - A preceding date, no more than **90 days** before the refund
 - A consistent allocation between wallet availability and benefit columns
 
-If the match is unambiguous, only the originally wallet-funded amount is imported as a refund. Otherwise, the refund is flagged for review instead of guessing.
+If the match is unambiguous, only the originally wallet-funded amount is imported as a refund. Otherwise, a refund with usable essential data is imported using the reported `Disponibilità` as a **provisional wallet amount**, even though that amount may include benefits and temporarily overstate the cash balance. Missing purchases, multiple matches, inconsistent funding and unverifiable refund details receive an orange flag and a memo explaining the assumption and what to check. They remain **uncleared and unapproved**.
+
+In YNAB, verify the wallet/benefit split, correct the amount if needed, then clear, approve and remove the orange flag. The original payee is preserved and the source description follows the review instructions within YNAB's 500-character memo limit. Ordinary transactions remain cleared and unapproved.
+
+Reimporting a file preserves stable import IDs even when additional history resolves an earlier ambiguity. It does not update the existing transaction or overwrite manual amount, memo, flag, approval or cleared-status corrections in YNAB.
 
 **Keep enough history in your export to include original purchases for any refunds.** Re-importing overlapping historical periods is supported through deterministic import IDs and the configured date cutoff.
 
@@ -304,7 +328,7 @@ If the match is unambiguous, only the originally wallet-funded amount is importe
 
 `/preview` and `/prepare` report `balanceCheck`. When suitable snapshots exist, it compares the delta between the oldest and newest available balances with the sum of wallet movements **between** those snapshots. The reported delta may therefore differ from `netMilliunits` across the entire export, because the oldest snapshot already includes its transaction.
 
-Balance discrepancies are **diagnostic**, not automatically a reason to block all imports. Invalid or unresolved candidate transactions do block writes.
+Balance discrepancies are **diagnostic** and do not block imports. An export-wide discrepancy is reported in the summary, without assigning a flag to an arbitrary transaction. If the audited interval contains invalid or provisional wallet amounts, the balance check reports `unavailable` rather than presenting an uncertain total as verified.
 
 ## Architecture
 
@@ -398,9 +422,10 @@ Test `GET /health` without credentials. For authenticated endpoints, configure a
 - Sensitive transaction details are not included in aggregate API responses.
 - Exports are parsed in memory, with strict request-size limits.
 - YNAB categories, real transfers, approval and reconciliation remain manual.
-- A refund whose original purchase is missing or ambiguous requires review; try a broader export.
-- Imported transactions are sent as cleared and unapproved (`cleared: "cleared"`, `approved: false`).
+- A refund whose original purchase is missing or ambiguous is imported provisionally for review; include a broader history to improve interpretation before the first import.
+- Ordinary transactions are cleared and unapproved. Provisional transactions are orange-flagged, uncleared and unapproved.
 - If the Worker reports an uncertain YNAB response, inspect YNAB before resubmitting.
+- A lost connection may leave an import partially completed without a final summary; no export or job state is persisted.
 
 ## Contributing
 

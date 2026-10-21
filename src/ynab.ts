@@ -4,7 +4,7 @@ import type { SatispayTransactionId, YnabAccountId } from "./domain.ts";
 import type { YnabAccounts } from "./ynab-contract.ts";
 import { Effect, Redacted, Schema, Schedule } from "effect";
 import { AppConfig, type YnabTarget } from "./config.ts";
-import type { YnabServiceApi } from "./ynab-contract.ts";
+import type { YnabImportResult, YnabServiceApi } from "./ynab-contract.ts";
 export type { YnabEnv } from "./config.ts";
 import {
   YnabError,
@@ -15,6 +15,7 @@ import {
   YnabWriteDisabledError,
   YnabImportRejectedError,
   YnabImportUncertainError,
+  YnabImportBatchError,
 } from "./errors.ts";
 export { YnabError } from "./errors.ts";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
@@ -77,8 +78,9 @@ export function buildYnabTransactionsEffect(
         amount: row.amountMilliunits,
         payee_name: row.payee,
         memo: row.memo || undefined,
-        cleared: "cleared" as const,
+        cleared: row.reviewReason ? ("uncleared" as const) : ("cleared" as const),
         approved: false,
+        ...(row.reviewReason ? { flag_color: "orange" as const } : {}),
         import_id,
       })),
     { concurrency: 4 },
@@ -236,47 +238,71 @@ export const makeYnabClient = Effect.gen(function* () {
           message: "YNAB write disabled: set YNAB_WRITE_ENABLED=true",
         }),
       );
-    if (plan.counts.rejected > 0)
-      return yield* Effect.fail(
-        new YnabImportRejectedError({
-          reason: "AmbiguousMovements",
-        }),
-      );
-    if (plan.candidates.length > 100)
+    if (plan.candidates.length > 10_000)
       return yield* Effect.fail(new YnabImportRejectedError({ reason: "BatchTooLarge" }));
     const target = yield* config.target;
     yield* validateTargetAccountEffect(target);
-    if (!plan.candidates.length)
-      return { submitted: 0, processed: 0, duplicateImports: 0, ynabReportedTransactionIds: 0 };
-    const transactions = yield* buildYnabTransactionsEffect(plan.candidates, target.accountId);
-    const token = target.token;
-    const rawResult = yield* postApiEffect(
-      "/plans/" + encodeURIComponent(target.planId) + "/transactions",
-      token,
-      { transactions },
-    );
-    const data = yield* Schema.decodeUnknownEffect(ImportResultSchema)(rawResult).pipe(
-      Effect.mapError(
-        () =>
-          new YnabImportUncertainError({
-            reason: { _tag: "Contract" },
-          }),
-      ),
-    );
-    const submitted = transactions.length;
-    const duplicateImports = data.duplicate_import_ids.length;
-    if (duplicateImports > submitted)
-      return yield* Effect.fail(
-        new YnabImportUncertainError({
-          reason: { _tag: "DuplicateCount" },
-        }),
-      );
-    return {
-      submitted,
-      processed: submitted - duplicateImports,
-      duplicateImports,
-      ynabReportedTransactionIds: data.transaction_ids.length,
+    let progress: YnabImportResult = {
+      submitted: 0,
+      processed: 0,
+      duplicateImports: 0,
+      ynabReportedTransactionIds: 0,
+      confirmed: 0,
+      uncertain: 0,
+      failed: 0,
+      notAttempted: plan.candidates.length,
     };
+    const token = target.token;
+    // Sequential batches: never retry a POST or continue after an uncertain write.
+    for (let offset = 0; offset < plan.candidates.length; offset += 500) {
+      const transactions = yield* buildYnabTransactionsEffect(
+        plan.candidates.slice(offset, offset + 500),
+        target.accountId,
+      ).pipe(Effect.mapError((reason) => new YnabImportBatchError({ reason, progress })));
+      const size = transactions.length;
+      progress = {
+        ...progress,
+        submitted: progress.submitted + size,
+        notAttempted: progress.notAttempted - size,
+      };
+      const data = yield* Effect.gen(function* () {
+        const rawResult = yield* postApiEffect(
+          "/plans/" + encodeURIComponent(target.planId) + "/transactions",
+          token,
+          { transactions },
+        );
+        const result = yield* Schema.decodeUnknownEffect(ImportResultSchema)(rawResult).pipe(
+          Effect.mapError(() => new YnabImportUncertainError({ reason: { _tag: "Contract" } })),
+        );
+        if (result.duplicate_import_ids.length > size)
+          return yield* Effect.fail(
+            new YnabImportUncertainError({ reason: { _tag: "DuplicateCount" } }),
+          );
+        return result;
+      }).pipe(
+        Effect.mapError(
+          (reason) =>
+            new YnabImportBatchError({
+              reason,
+              progress: {
+                ...progress,
+                uncertain: reason._tag === "YnabImportUncertainError" ? size : 0,
+                failed: reason._tag === "YnabImportUncertainError" ? 0 : size,
+              },
+            }),
+        ),
+      );
+      const duplicates = data.duplicate_import_ids.length;
+      progress = {
+        ...progress,
+        confirmed: progress.confirmed + size,
+        processed: progress.processed + size - duplicates,
+        duplicateImports: progress.duplicateImports + duplicates,
+        ynabReportedTransactionIds:
+          progress.ynabReportedTransactionIds + data.transaction_ids.length,
+      };
+    }
+    return progress;
   });
 
   return {

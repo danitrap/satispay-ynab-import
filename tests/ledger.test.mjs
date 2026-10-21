@@ -64,16 +64,21 @@ test("mixed meal-voucher refunds match original purchase and only restore wallet
   assert.equal(preview.balanceCheck.discrepancyMilliunits, 0);
   assert.equal(preview.requiresReview, 0);
 });
-test("missing merchant original never imports unverified full refund", () => {
+test("missing merchant original imports the reported refund provisionally", () => {
   const data = [headers, row(date(28), "Cafe", 20.23, "🔄 Rimborso", 20.23, null, 100, "refund")];
   const audit = analyzeLedger(data);
   assert.equal(audit.refundsUnresolved, 1);
-  assert.equal(audit.resolved[0].issue, "refund_purchase_not_in_export");
+  assert.equal(audit.resolved[0].reviewReason, "refund_purchase_not_in_export");
+  assert.equal(audit.resolved[0].amountCents, 2023);
   const preview = previewSatispay(data);
   assert.equal(preview.requiresReview, 1);
   const plan = buildImportPlan(data, "2026-08-01");
-  assert.equal(plan.counts.rejected, 1);
-  assert.equal(plan.candidates.length, 0);
+  assert.equal(plan.counts.rejected, 0);
+  assert.equal(plan.counts.provisional, 1);
+  assert.equal(plan.candidates.length, 1);
+  assert.equal(preview.eligible, 1);
+  assert.equal(preview.provisional, 1);
+  assert.equal(preview.inflowMilliunits, 20230);
 });
 test("ambiguous same-merchant equal-amount purchases are not guessed", () => {
   const rows = [
@@ -83,7 +88,60 @@ test("ambiguous same-merchant equal-amount purchases are not guessed", () => {
     row(date(27), "Cafe", -20.23, "🏬 a un Negozio", -12.23, -8, 200, "purchase-2"),
   ];
   const r = analyzeLedger(rows);
-  assert.equal(r.resolved[0].issue, "ambiguous_refund_purchase");
+  assert.equal(r.resolved[0].reviewReason, "ambiguous_refund_purchase");
+  assert.equal(r.resolved[0].amountCents, 2023);
+});
+test("inconsistent funding and unverifiable nominal amounts retain a provisional wallet amount", () => {
+  for (const [nominal, benefit, reason] of [
+    [20, -10, "refund_purchase_funding_mismatch"],
+    ["invalid", -16, "invalid_refund_details"],
+  ]) {
+    const rows = [
+      headers,
+      row(date(28), "Cafe", nominal, "🔄 Rimborso", 20, null, 120, "refund"),
+      row(date(27), "Cafe", -20, "🏬 a un Negozio", -4, benefit, 100, "purchase"),
+    ];
+    const plan = buildImportPlan(rows, "2026-08-01");
+    const refund = plan.candidates.find((candidate) => candidate.satispayId === "refund");
+    assert.equal(refund.amountMilliunits, 20000);
+    assert.equal(refund.reviewReason, reason);
+    assert.equal(plan.counts.provisional, 1);
+    assert.equal(plan.counts.rejected, 0);
+    // Provisional values must not make the balance audit look verified.
+    assert.equal(plan.balanceCheck.status, "unavailable");
+    assert.equal(previewSatispay(rows).requiresReview, 1);
+  }
+});
+test("indexed refund matching retains inclusive 90-day boundaries and merchant normalization", () => {
+  const refundTime = Date.parse("2026-10-18T12:00:00Z");
+  const oldest = refundTime - 90 * 24 * 60 * 60 * 1000;
+  for (const [purchaseTime, reviewReason] of [
+    [oldest, undefined],
+    [refundTime, undefined],
+    [oldest - 1, "refund_purchase_not_in_export"],
+    [refundTime + 1, "refund_purchase_not_in_export"],
+  ]) {
+    const rows = [
+      headers,
+      row(new Date(refundTime), "Cafe A", 20, "🔄 Rimborso", 20, null, 100, "refund"),
+      row(new Date(purchaseTime), "  CAFE   A ", -20, "🏬 a un Negozio", -4, -16, 96, "purchase"),
+    ];
+    const resolution = analyzeLedger(rows).resolved[0];
+    assert.equal(resolution.reviewReason, reviewReason);
+    assert.equal(resolution.amountCents, reviewReason ? 2000 : 400);
+  }
+});
+test("a 10,000-row export with repeated merchant amounts retains every ambiguous refund for review", () => {
+  const rows = [headers];
+  for (let index = 0; index < 5000; index++) {
+    rows.push(row(date(28), "Cafe", 20, "🔄 Rimborso", 20, null, null, `refund-${index}`));
+    rows.push(row(date(27), "Cafe", -20, "🏬 a un Negozio", -4, -16, null, `purchase-${index}`));
+  }
+  const plan = buildImportPlan(rows, "2026-08-01");
+  assert.equal(plan.candidates.length, 10_000);
+  assert.equal(plan.counts.provisional, 5000);
+  assert.equal(plan.reviewIssues.ambiguous_refund_purchase, 5000);
+  assert.equal(plan.counts.rejected, 0);
 });
 test("a full voucher refund leads to a zero wallet amount and is skipped", () => {
   const rows = [

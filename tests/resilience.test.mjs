@@ -106,8 +106,10 @@ test("a server error after POST is uncertain and never retried", async () => {
   const error = await Effect.runPromise(
     importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, fetchFn)), Effect.flip),
   );
-  assert.equal(error._tag, "YnabImportUncertainError");
-  assert.deepEqual(error.reason, { _tag: "Http", status: 503 });
+  assert.equal(error._tag, "YnabImportBatchError");
+  assert.equal(error.reason._tag, "YnabImportUncertainError");
+  assert.deepEqual(error.reason.reason, { _tag: "Http", status: 503 });
+  assert.equal(error.progress.uncertain, 1);
   assert.equal(writes, 1);
 });
 
@@ -144,8 +146,10 @@ test(
         yield* Effect.promise(() => postStarted);
         yield* TestClock.adjust("10 seconds");
         const error = yield* Fiber.join(fiber);
-        assert.equal(error._tag, "YnabImportUncertainError");
-        assert.deepEqual(error.reason, { _tag: "Timeout" });
+        assert.equal(error._tag, "YnabImportBatchError");
+        assert.equal(error.reason._tag, "YnabImportUncertainError");
+        assert.deepEqual(error.reason.reason, { _tag: "Timeout" });
+        assert.equal(error.progress.uncertain, 1);
         assert.equal(writes, 1);
         assert.equal(aborted, true);
       }),
@@ -354,8 +358,10 @@ test("malformed YNAB envelopes and payloads keep read and uncertain write failur
         Effect.flip,
       ),
     );
-    assert.equal(writeError._tag, "YnabImportUncertainError");
-    assert.deepEqual(writeError.reason, { _tag: writeReason });
+    assert.equal(writeError._tag, "YnabImportBatchError");
+    assert.equal(writeError.reason._tag, "YnabImportUncertainError");
+    assert.deepEqual(writeError.reason.reason, { _tag: writeReason });
+    assert.equal(writeError.progress.uncertain, 1);
     assert.equal(writes, 1);
   }
 });
