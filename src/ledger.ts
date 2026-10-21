@@ -8,7 +8,17 @@ import {
 } from "./domain.ts";
 import type { SheetCell } from "./spreadsheet.ts";
 
-type RefundResolution = { amountCents: Cents | null; issue?: string; adjusted?: boolean };
+export type RefundReviewReason =
+  | "ambiguous_refund_purchase"
+  | "refund_purchase_not_in_export"
+  | "refund_purchase_funding_mismatch"
+  | "invalid_refund_details";
+type RefundResolution = {
+  amountCents: Cents | null;
+  issue?: string;
+  reviewReason?: RefundReviewReason;
+  adjusted?: boolean;
+};
 type BalanceAudit = {
   status: "ok" | "mismatch" | "unavailable";
   expectedChangeMilliunits?: number;
@@ -28,10 +38,9 @@ function time(value: SheetCell): number | null {
     ? parsed
     : null;
 }
-function compareName(a: SheetCell, b: SheetCell): boolean {
-  const x = text(a).toLocaleLowerCase("it-IT").replace(/\s+/g, " ");
-  const y = text(b).toLocaleLowerCase("it-IT").replace(/\s+/g, " ");
-  return x !== "" && x !== "-" && x === y;
+function merchantName(value: SheetCell): string {
+  const name = text(value).toLocaleLowerCase("it-IT").replace(/\s+/g, " ");
+  return name === "-" ? "" : name;
 }
 export function analyzeLedger(rows: SheetCell[][]): {
   resolved: RefundResolution[];
@@ -58,6 +67,32 @@ export function analyzeLedger(rows: SheetCell[][]): {
   let refundsAdjusted = 0,
     refundsUnresolved = 0;
   const maxDistance = 90 * 24 * 60 * 60 * 1000;
+  // Index purchases once: large exports must not rescan every row for every refund.
+  const purchases = new Map<string, { index: number; time: number }[]>();
+  for (const [index, row] of records.entries()) {
+    if (text(row[idx("Tipo")]) !== "🏬 a un Negozio" || text(row[idx("Stato")]) !== "✅ Approvato")
+      continue;
+    const name = merchantName(row[idx("Nome")]);
+    const nominal = cents(row[idx("Importo")]);
+    const date = time(row[idx("Data")]);
+    if (!name || nominal === null || date === null) continue;
+    const key = JSON.stringify([name, nominal]);
+    const bucket = purchases.get(key) ?? [];
+    bucket.push({ index, time: date });
+    purchases.set(key, bucket);
+  }
+  for (const bucket of purchases.values()) bucket.sort((a, b) => a.time - b.time);
+  const boundary = (bucket: { time: number }[], date: number, inclusive: boolean): number => {
+    let low = 0,
+      high = bucket.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (bucket[middle].time < date || (inclusive && bucket[middle].time === date))
+        low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
   for (let i = 0; i < records.length; i++) {
     const refund = records[i];
     if (text(refund[idx("Tipo")]) !== "🔄 Rimborso") continue;
@@ -72,38 +107,26 @@ export function analyzeLedger(rows: SheetCell[][]): {
     const nominal = cents(refund[idx("Importo")]);
     const refundTime = time(refund[idx("Data")]);
     if (nominal === null || nominal <= 0 || refundTime === null) {
-      resolved[i] = { amountCents: null, issue: "invalid_refund_details" };
+      resolved[i] = { amountCents: reported, reviewReason: "invalid_refund_details" };
       refundsUnresolved++;
       continue;
     }
-    const candidates = records.filter((original, j) => {
-      if (
-        i === j ||
-        text(original[idx("Tipo")]) !== "🏬 a un Negozio" ||
-        text(original[idx("Stato")]) !== "✅ Approvato"
-      )
-        return false;
-      const originalTime = time(original[idx("Data")]);
-      if (
-        originalTime === null ||
-        originalTime > refundTime ||
-        refundTime - originalTime > maxDistance
-      )
-        return false;
-      return (
-        cents(original[idx("Importo")]) === -nominal &&
-        compareName(original[idx("Nome")], refund[idx("Nome")])
-      );
-    });
-    if (candidates.length !== 1) {
+    const name = merchantName(refund[idx("Nome")]);
+    const bucket = name ? (purchases.get(JSON.stringify([name, -nominal])) ?? []) : [];
+    const first = boundary(bucket, refundTime - maxDistance, false);
+    const last = boundary(bucket, refundTime, true);
+    const candidateCount = last - first;
+    if (candidateCount !== 1) {
       resolved[i] = {
-        amountCents: null,
-        issue: candidates.length ? "ambiguous_refund_purchase" : "refund_purchase_not_in_export",
+        amountCents: reported,
+        reviewReason: candidateCount
+          ? "ambiguous_refund_purchase"
+          : "refund_purchase_not_in_export",
       };
       refundsUnresolved++;
       continue;
     }
-    const original = candidates[0];
+    const original = records[bucket[first].index];
     const originalAmount = cents(original[idx("Disponibilità")]);
     const walletSpent =
       originalAmount === null && !text(original[idx("Disponibilità")]) ? 0 : originalAmount;
@@ -121,7 +144,7 @@ export function analyzeLedger(rows: SheetCell[][]): {
       benefitSum === null ||
       walletSpent + benefitSum !== -nominal
     ) {
-      resolved[i] = { amountCents: null, issue: "refund_purchase_funding_mismatch" };
+      resolved[i] = { amountCents: reported, reviewReason: "refund_purchase_funding_mismatch" };
       refundsUnresolved++;
       continue;
     }
@@ -148,7 +171,7 @@ export function analyzeLedger(rows: SheetCell[][]): {
           oldest = anchors[anchors.length - 1];
         // The oldest snapshot already includes that transaction: exclude its movement.
         const considered = resolved.slice(recent.index, oldest.index);
-        if (considered.some((x) => x.issue)) {
+        if (considered.some((x) => x.issue || x.reviewReason)) {
           balanceCheck = { status: "unavailable", reason: "unresolved_or_invalid_wallet_amount" };
         } else {
           const expected = recent.balance - oldest.balance;

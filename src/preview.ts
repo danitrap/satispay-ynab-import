@@ -15,6 +15,7 @@ export type PreviewRow = {
   reason: string;
   type: string;
   amountMilliunits?: Milliunits;
+  provisional?: boolean;
 };
 
 function cellText(value: Cell): string {
@@ -93,10 +94,14 @@ export function previewSatispay(rows: Cell[][]) {
         isValidDate(row[find("Data")]),
         id !== "" && typeof row[idIndex] === "string" && idCounts.get(id) === 1,
       );
+      if (result.decision === "include" && resolution.reviewReason) {
+        result = { ...result, reason: resolution.reviewReason, provisional: true };
+      }
     }
     all.push(result);
     const bucket = byType.get(type) ?? { include: 0, skip: 0, review: 0 };
     bucket[result.decision]++;
+    if (result.provisional) bucket.review++;
     byType.set(type, bucket);
     byReason.set(result.reason, (byReason.get(result.reason) ?? 0) + 1);
     if (result.decision === "include") {
@@ -119,7 +124,8 @@ export function previewSatispay(rows: Cell[][]) {
     rowCount: all.length,
     eligible: count("include"),
     skipped: count("skip"),
-    requiresReview: count("review"),
+    requiresReview: count("review") + all.filter((row) => row.provisional).length,
+    provisional: all.filter((row) => row.provisional).length,
     outflowEur: money(outflowCents),
     inflowEur: money(inflowCents),
     netEur: money(inflowCents - outflowCents),

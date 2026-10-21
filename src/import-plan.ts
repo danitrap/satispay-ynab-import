@@ -9,7 +9,7 @@ import {
   type SatispayTransactionId,
 } from "./domain.ts";
 import type { SheetCell } from "./spreadsheet.ts";
-import { analyzeLedger } from "./ledger.ts";
+import { analyzeLedger, type RefundReviewReason } from "./ledger.ts";
 
 export type ImportCandidate = {
   satispayId: SatispayTransactionId;
@@ -18,6 +18,7 @@ export type ImportCandidate = {
   payee: string;
   memo: string;
   type: string;
+  reviewReason?: RefundReviewReason;
 };
 export type ImportPlan = {
   candidates: ImportCandidate[];
@@ -26,9 +27,11 @@ export type ImportPlan = {
     olderThanStart: number;
     withoutAvailability: number;
     rejected: number;
+    provisional: number;
     inScope: number;
   };
   issues: Record<string, number>;
+  reviewIssues: Record<string, number>;
   fromDate: CalendarDate;
   inflowMilliunits: Milliunits;
   outflowMilliunits: Milliunits;
@@ -50,6 +53,17 @@ export function parseDate(value: SheetCell): CalendarDate | null {
 function safeLabel(s: string, fallback: string, maximum: number): string {
   return (s || fallback).slice(0, maximum);
 }
+function reviewMemo(reason: RefundReviewReason, description: string): string {
+  const explanation = {
+    ambiguous_refund_purchase: "Multiple original purchases match this refund.",
+    refund_purchase_not_in_export: "The original purchase is absent from this export.",
+    refund_purchase_funding_mismatch:
+      "The original purchase has inconsistent wallet/benefit funding.",
+    invalid_refund_details: "The refund details cannot be verified.",
+  }[reason];
+  const instruction = `[Satispay review] ${explanation} Using reported Disponibilità as the provisional wallet amount. Verify the cash/benefit split, correct the amount, then clear, approve and remove the orange flag.`;
+  return (instruction + (description ? "\n" + description : "")).slice(0, 500);
+}
 export function buildImportPlan(rows: SheetCell[][], fromDate: string): ImportPlan {
   const cutoff = calendarDate(fromDate);
   if (!cutoff) throw new PlanInputError("InvalidCutoff");
@@ -67,9 +81,11 @@ export function buildImportPlan(rows: SheetCell[][], fromDate: string): ImportPl
     olderThanStart: 0,
     withoutAvailability: 0,
     rejected: 0,
+    provisional: 0,
     inScope: 0,
   };
   const issues: Record<string, number> = {};
+  const reviewIssues: Record<string, number> = {};
   const candidates: ImportCandidate[] = [];
   const ids = new Map<string, number>();
   for (const row of data) {
@@ -128,14 +144,20 @@ export function buildImportPlan(rows: SheetCell[][], fromDate: string): ImportPl
     const fallbackPayee = type ? "Satispay — " + type : "Satispay";
     const payee = rawPayee && rawPayee !== "-" ? rawPayee : fallbackPayee;
     const memo = text(row[get("Descrizione")]);
+    const reviewReason = resolution.reviewReason;
+    if (reviewReason) {
+      counts.provisional++;
+      reviewIssues[reviewReason] = (reviewIssues[reviewReason] ?? 0) + 1;
+    }
     candidates.push({
       satispayId: satispayTransactionId(id)!,
       date,
       amountMilliunits: amount,
       payee:
         amount > 0 && type === "🎖️ Punti" ? "Satispay Cashback" : safeLabel(payee, "Satispay", 80),
-      memo: safeLabel(memo, "", 200),
+      memo: reviewReason ? reviewMemo(reviewReason, memo) : safeLabel(memo, "", 200),
       type,
+      ...(reviewReason ? { reviewReason } : {}),
     });
   }
   candidates.sort(
@@ -159,6 +181,7 @@ export function buildImportPlan(rows: SheetCell[][], fromDate: string): ImportPl
     candidates,
     counts,
     issues,
+    reviewIssues,
     fromDate: cutoff,
     inflowMilliunits: inflow,
     outflowMilliunits: outflow,
@@ -172,6 +195,8 @@ export function summarizeImportPlan(plan: ImportPlan) {
   return {
     ...plan.counts,
     issues: plan.issues,
+    reviewIssues: plan.reviewIssues,
+    requiresReview: plan.counts.rejected + plan.counts.provisional,
     fromDate: plan.fromDate,
     inflowMilliunits: plan.inflowMilliunits,
     outflowMilliunits: plan.outflowMilliunits,

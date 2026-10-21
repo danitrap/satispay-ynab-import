@@ -287,23 +287,18 @@ export const handleRequestEffect = Effect.fnUntraced(
           ),
         ImportPlanError: (error) =>
           Effect.succeed(json({ ok: false, error: error.message, imported: 0 }, 422)),
-        ImportBlockedError: (error) =>
+        ImportFailedError: (error) =>
           Effect.succeed(
             json(
               {
                 ok: false,
-                mode: "import-blocked",
+                mode: "import-failed",
                 ...error.summary,
-                imported: 0,
+                ...(error.reason._tag === "YnabImportBatchError"
+                  ? { ...error.reason.progress, imported: error.reason.progress.processed }
+                  : { imported: 0 }),
                 error: error.message,
               },
-              422,
-            ),
-          ),
-        ImportFailedError: (error) =>
-          Effect.succeed(
-            json(
-              { ok: false, mode: "import-failed", ...error.summary, error: error.message },
               ynabFailureStatus(error.reason),
             ),
           ),

@@ -209,6 +209,10 @@ test("YNAB import accepts successful batch with duplicate_import_ids", async () 
     processed: 1,
     duplicateImports: 0,
     ynabReportedTransactionIds: 1,
+    confirmed: 1,
+    uncertain: 0,
+    failed: 0,
+    notAttempted: 0,
   });
   assert.match(calls[1].url, /\/v1\/plans\/plan\/transactions$/);
   assert.equal(calls[1].body.transactions[0].payee_name, "Negozio A");
@@ -264,6 +268,10 @@ test("matched transaction IDs do not inflate processed movement count", async ()
     processed: 2,
     duplicateImports: 0,
     ynabReportedTransactionIds: 4,
+    confirmed: 2,
+    uncertain: 0,
+    failed: 0,
+    notAttempted: 0,
   });
 });
 test("repeated import IDs count as duplicates, not processed movements", async () => {

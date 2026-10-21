@@ -3,6 +3,7 @@ import { failureMessage } from "./failure-message.ts";
 import { Data } from "effect";
 import type { ConfigurationError } from "./config.ts";
 import type { summarizeImportPlan } from "./import-plan.ts";
+import type { YnabImportResult } from "./ynab-contract.ts";
 
 export type ImportSummary = ReturnType<typeof summarizeImportPlan>;
 
@@ -41,7 +42,7 @@ export class YnabWriteDisabledError extends Data.TaggedError("YnabWriteDisabledE
   readonly message: string;
 }> {}
 export class YnabImportRejectedError extends Data.TaggedError("YnabImportRejectedError")<{
-  readonly reason: "AmbiguousMovements" | "BatchTooLarge";
+  readonly reason: "BatchTooLarge";
 }> {
   override get message(): string {
     return failureMessage(this);
@@ -57,6 +58,15 @@ export class YnabImportUncertainError extends Data.TaggedError("YnabImportUncert
   }
 }
 
+export class YnabImportBatchError extends Data.TaggedError("YnabImportBatchError")<{
+  readonly reason: YnabError | YnabHttpError | YnabImportUncertainError;
+  readonly progress: YnabImportResult;
+}> {
+  override get message(): string {
+    return this.reason.message;
+  }
+}
+
 export type YnabReadFailure =
   ConfigurationError | YnabTransportError | YnabHttpError | YnabResponseError;
 export type YnabAccountFailure = YnabReadFailure | YnabAccountError;
@@ -65,7 +75,8 @@ export type YnabImportFailure =
   | YnabError
   | YnabWriteDisabledError
   | YnabImportRejectedError
-  | YnabImportUncertainError;
+  | YnabImportUncertainError
+  | YnabImportBatchError;
 export type YnabFailure = YnabImportFailure;
 
 export class ImportPlanError extends Data.TaggedError("ImportPlanError")<{
@@ -75,10 +86,6 @@ export class ImportPlanError extends Data.TaggedError("ImportPlanError")<{
     return failureMessage(this);
   }
 }
-export class ImportBlockedError extends Data.TaggedError("ImportBlockedError")<{
-  readonly summary: ImportSummary;
-  readonly message: string;
-}> {}
 export class ImportFailedError extends Data.TaggedError("ImportFailedError")<{
   readonly summary: ImportSummary;
   readonly reason: YnabImportFailure;

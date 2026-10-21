@@ -68,14 +68,31 @@ test("an invalid write switch fails configuration without contacting YNAB", asyn
   assert.match((await response.json()).error, /YNAB_WRITE_ENABLED/);
 });
 
-test("duplicate movements block import and retain diagnostics without contacting YNAB", async () => {
+test("duplicate movements are excluded without blocking completion", async () => {
   const duplicates = readFileSync(new URL("./fixtures/satispay-duplicates.xlsx", import.meta.url));
-  const response = await runRequest("import", { YNAB_WRITE_ENABLED: "true" }, duplicates);
-  assert.equal(response.status, 422);
+  let writes = 0;
+  const response = await runRequest(
+    "import",
+    {
+      YNAB_WRITE_ENABLED: "true",
+      YNAB_TOKEN: "fake",
+      YNAB_PLAN_ID: "plan",
+      YNAB_ACCOUNT_ID: "wallet",
+    },
+    duplicates,
+    async (_url, init) => {
+      if (init.method === "POST") writes++;
+      return Response.json({
+        data: { account: { id: "wallet", name: "Satispay", on_budget: true, closed: false } },
+      });
+    },
+  );
+  assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.mode, "import-blocked");
+  assert.equal(body.mode, "import-completed");
   assert.equal(body.rejected, 2);
   assert.equal(body.imported, 0);
+  assert.equal(writes, 0);
   assert.equal(body.issues.missing_nontext_or_duplicate_id, 2);
 });
 
