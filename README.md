@@ -338,7 +338,7 @@ The Worker uses [Effect v4](https://effect.website/) throughout its asynchronous
 - **`Config` + `Schema`** validate operation-specific settings from Cloudflare bindings; `Redacted` keeps decoded tokens out of ordinary diagnostic output. Configuration failures retain only the setting name and a safe message.
 - **`Layer`** provides the HTTP-backed implementation at the Worker request boundary. `ynabTestLayer` replaces it with an in-memory service in tests.
 - **Effect `HttpClient` + `FetchHttpClient`** run YNAB API requests using a fetch-compatible transport suitable for Cloudflare Workers.
-- **`Schema.decodeUnknownEffect`** validates incoming YNAB JSON instead of trusting untyped responses.
+- **`HttpClientResponse.schemaBodyJson` + `Schema.decodeUnknownEffect`** validate the YNAB response envelope and operation-specific payloads instead of trusting untyped responses.
 - **`Effect.forEach`** produces stable SHA-256 import IDs with bounded concurrency.
 - **`Data.TaggedError` + `Effect.catchTags`** distinguish configuration, validation, transport and uncertain import failures. The import pipeline returns tagged application outcomes; the router owns HTTP status codes and JSON responses.
 
@@ -346,7 +346,7 @@ The domain modules stay independent of Effect. There is no global runtime holdin
 
 `requestLiveLayer` is the single composition root for each request. It provides one configuration module and the fetch transport, then builds the YNAB implementation, which closes over those dependencies. The router and import programs consume their declared requirements; `YnabServiceApi` describes public results and failures independently of the implementation. Type-level tests verify that public operations leave no infrastructure requirements for callers.
 
-Account discovery, target validation and imports declare separate failure types. Uncertain HTTP writes always carry a status, and an import reuses the target configuration it validated. Workbook analysis maps declared input errors to HTTP 422 while preserving unexpected exceptions as defects. The external XLSX decoder is injectable through `WorkbookReader` for testing both paths.
+Account discovery, target validation and imports declare separate failure types. Uncertain HTTP writes always carry a status, and an import reuses the target configuration it validated. Workbook analysis maps declared input errors to HTTP 422 while preserving unexpected exceptions as defects. The external XLSX decoder is injectable through `WorkbookReader`, whose Effect operations declare `WorkbookError` failures and preserve unexpected defects from injected implementations. The Promise-based library is adapted inside the live service.
 
 Money units and identifiers have distinct branded types. Pure constructors check exact cents and safe milliunit conversions; unsafe movements are flagged for review, overflowing totals are rejected, and balance audits report unavailable when their arithmetic cannot remain exact. Schema validates calendar dates and target IDs at the request boundary. Failures carry structured reasons with safe, derived messages; only known plan-input errors are treated as invalid uploads, while unexpected planning exceptions remain defects.
 
@@ -354,7 +354,7 @@ Money units and identifiers have distinct branded types. Pure constructors check
 
 Uploads use an Effect `Stream` with a 30-second deadline (HTTP 408 on expiry), bounded bytes, reader-lock release and body cancellation on failure or interruption. The Worker forwards the request's abort signal to the Effect runtime. Each YNAB attempt, including response-body decoding, has a 10-second deadline. GET transport failures and HTTP 502/503/504 get at most two retries, delayed by 200 ms and 400 ms; authentication, rate-limit and decoding failures are not retried. POST is always attempted once, and a timeout or server error preserves an uncertain outcome.
 
-Named `Effect.fn` spans cover workbook decoding, uploads, imports, account discovery and target validation. `satispay_operation_duration_ms` and `satispay_operations_total` record operation timing and success/failure with fixed labels; they contain no transaction arguments, credentials or error payloads. These metrics and spans are instrumentation hooks: exporting them to an external collector requires a separately configured exporter. Tests use Effect's `TestClock` to verify backoff and deadlines without real-time waits.
+Named `Effect.fn` spans cover workbook decoding, uploads, imports, account discovery and target validation. `satispay_operation_duration_ms` and `satispay_operations_total` record operation timing using a monotonic clock through `Effect.trackDuration`, and success/failure with fixed labels; they contain no transaction arguments, credentials or error payloads. These metrics and spans are instrumentation hooks: exporting them to an external collector requires a separately configured exporter. Tests use Effect's `TestClock` to verify backoff and deadlines without real-time waits.
 
 ## Development
 
