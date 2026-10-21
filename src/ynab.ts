@@ -1,7 +1,8 @@
+import { observeOperation } from "./telemetry.ts";
 import { YnabAccountIdSchema, YnabPlanIdSchema } from "./domain-schema.ts";
 import type { SatispayTransactionId, YnabAccountId } from "./domain.ts";
 import type { YnabAccounts } from "./ynab-contract.ts";
-import { Effect, Redacted, Schema } from "effect";
+import { Effect, Redacted, Schema, Schedule } from "effect";
 import { AppConfig } from "./config.ts";
 import type { YnabServiceApi } from "./ynab-contract.ts";
 export type { YnabEnv } from "./config.ts";
@@ -81,7 +82,7 @@ export function buildYnabTransactionsEffect(
 
 /** Acquire infrastructure once; all returned operations are dependency-free. */
 export const makeYnabClient = Effect.gen(function* () {
-  const http = yield* HttpClient.HttpClient;
+  const http = HttpClient.withScope(yield* HttpClient.HttpClient);
   const config = yield* AppConfig;
   /** One Effect for transport, HTTP status and response decoding; errors are typed. */
   function apiEffect(path: string, token: string, method: "GET" | "POST" = "GET", body?: unknown) {
@@ -133,11 +134,33 @@ export const makeYnabClient = Effect.gen(function* () {
       }
       return parsed.data;
     });
-    return execute;
+    const attempt = Effect.scoped(execute).pipe(
+      Effect.timeoutOrElse({
+        duration: "10 seconds",
+        orElse: () =>
+          Effect.fail(
+            method === "POST"
+              ? new YnabImportUncertainError({ reason: "Timeout" })
+              : new YnabTransportError({ reason: "Timeout" }),
+          ),
+      }),
+      observeOperation(method === "GET" ? "ynab.read" : "ynab.write"),
+    );
+    return method === "POST"
+      ? attempt
+      : attempt.pipe(
+          Effect.retry({
+            times: 2,
+            schedule: Schedule.exponential("200 millis"),
+            while: (error) =>
+              error._tag === "YnabTransportError" ||
+              (error._tag === "YnabHttpError" && [502, 503, 504].includes(error.status)),
+          }),
+        );
   }
 
-  function findSatispayAccountsEffect() {
-    return Effect.gen(function* () {
+  const findSatispayAccountsEffect = Effect.fn("satispay.ynab.findAccounts")(() =>
+    Effect.gen(function* () {
       const token = Redacted.value(yield* config.token);
       const rawPlans = yield* apiEffect("/plans", token, "GET");
       const { plans } = yield* Schema.decodeUnknownEffect(PlansSchema)(rawPlans).pipe(
@@ -170,11 +193,11 @@ export const makeYnabClient = Effect.gen(function* () {
         }
       }
       return { matches };
-    });
-  }
+    }),
+  );
 
-  function validateTargetAccountEffect() {
-    return Effect.gen(function* () {
+  const validateTargetAccountEffect = Effect.fn("satispay.ynab.validateAccount")(() =>
+    Effect.gen(function* () {
       const target = yield* config.target;
       const token = Redacted.value(target.token);
       const rawAccount = yield* apiEffect(
@@ -207,11 +230,11 @@ export const makeYnabClient = Effect.gen(function* () {
                   : undefined;
       if (reason) return yield* Effect.fail(new YnabAccountError({ reason }));
       return account;
-    });
-  }
+    }),
+  );
 
-  function sendToYnabEffect(plan: ImportPlan) {
-    return Effect.gen(function* () {
+  const sendToYnabEffect = Effect.fn("satispay.ynab.importPlan")((plan: ImportPlan) =>
+    Effect.gen(function* () {
       if (!(yield* config.writesEnabled))
         return yield* Effect.fail(
           new YnabWriteDisabledError({
@@ -260,8 +283,8 @@ export const makeYnabClient = Effect.gen(function* () {
         duplicateImports,
         ynabReportedTransactionIds: data.transaction_ids.length,
       };
-    });
-  }
+    }),
+  );
 
   return {
     findAccounts: findSatispayAccountsEffect(),

@@ -1,4 +1,5 @@
-import { Data, Effect, Redacted } from "effect";
+import { observeOperation } from "./telemetry.ts";
+import { Data, Effect, Redacted, Stream } from "effect";
 import { AppConfig, type AppEnv } from "./config.ts";
 import { decodeCsv, parseCsv } from "./csv.ts";
 import { inspectXlsxEffect, previewXlsxEffect } from "./spreadsheet.ts";
@@ -49,41 +50,55 @@ const ynabFailureResponse = (error: YnabFailure) =>
   Effect.succeed(json({ ok: false, error: error.message }, ynabFailureStatus(error)));
 
 /** Bounded upload reads: also protect requests without Content-Length. */
-const readRequestBodyEffect = (request: Request) =>
-  Effect.tryPromise({
-    try: async () => {
-      const reader = request.body?.getReader();
-      if (!reader) throw new UploadError("Missing request body");
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      while (true) {
-        const next = await reader.read();
-        if (next.done) break;
-        total += next.value.byteLength;
-        if (total > MAX_REQUEST_BYTES) {
-          await reader.cancel();
-          throw new UploadError("Upload too large", 413);
-        }
-        chunks.push(next.value);
-      }
-      const body = new Uint8Array(total);
-      let offset = 0;
-      for (const chunk of chunks) {
-        body.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
-      return body;
-    },
-    catch: (e) => (e instanceof UploadError ? e : new UploadError("Cannot read request")),
-  });
+const readRequestBodyEffect = Effect.fn("satispay.upload")((request: Request) =>
+  Effect.gen(function* () {
+    const body = request.body;
+    if (!body) return yield* Effect.fail(new UploadError("Missing request body"));
+    let total = 0;
+    const chunks = yield* Effect.acquireUseRelease(
+      Effect.succeed(body),
+      (stream) =>
+        Stream.fromReadableStream({
+          evaluate: () => stream,
+          releaseLockOnEnd: true,
+          onError: () => new UploadError("Cannot read request"),
+        }).pipe(
+          Stream.mapEffect((chunk) =>
+            Effect.suspend(() => {
+              total += chunk.byteLength;
+              return total > MAX_REQUEST_BYTES
+                ? Effect.fail(new UploadError("Upload too large", 413))
+                : Effect.succeed(chunk);
+            }),
+          ),
+          Stream.runCollect,
+        ),
+      (stream) => Effect.promise(() => stream.cancel().catch(() => undefined)),
+    );
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: "30 seconds",
+      orElse: () => Effect.fail(new UploadError("Upload timed out", 408)),
+    }),
+    observeOperation("upload"),
+  ),
+);
 
 const decodeMultipartEffect = (body: Uint8Array, contentType: string) =>
   Effect.tryPromise({
-    try: async () => {
+    try: async (signal) => {
       const copy = new Request("https://local.invalid/inspect", {
         method: "POST",
         headers: { "Content-Type": contentType },
         body: body.buffer as ArrayBuffer,
+        signal,
       });
       const form = await copy.formData();
       const file = form.get("file");
@@ -307,6 +322,7 @@ export default {
   fetch(request: Request, env: Env): Promise<Response> {
     return Effect.runPromise(
       handleRequestEffect(request).pipe(Effect.provide(requestLiveLayer(env))),
+      { signal: request.signal },
     );
   },
 };

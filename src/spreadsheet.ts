@@ -1,3 +1,4 @@
+import { observeOperation } from "./telemetry.ts";
 import { Data, Effect } from "effect";
 import { previewSatispay } from "./preview.ts";
 
@@ -127,14 +128,15 @@ export class WorkbookError extends Data.TaggedError("WorkbookError")<{ readonly 
 }
 
 /** Untrusted xlsx decoding happens at the I/O boundary, errors remain typed. */
-export const readSheetEffect = (file: ArrayBuffer) =>
+export const readSheetEffect = Effect.fn("satispay.workbook")((file: ArrayBuffer) =>
   Effect.tryPromise({
     try: async () => {
       const { readSheet } = await import("read-excel-file/universal");
       return (await readSheet(file)) as unknown as SheetCell[][];
     },
     catch: () => new WorkbookError("Cannot parse XLSX workbook. Check the exported Excel file."),
-  });
+  }).pipe(observeOperation("workbook")),
+);
 export const inspectXlsxEffect = (file: ArrayBuffer) =>
   readSheetEffect(file).pipe(
     Effect.flatMap((rows) =>
