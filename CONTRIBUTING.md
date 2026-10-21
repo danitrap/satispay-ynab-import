@@ -8,12 +8,15 @@ Follow the [Quick start](README.md#quick-start-from-fork-to-first-preview). Repl
 
 ```bash
 npm ci
+npm run format:check
 npm test
 npm run check
 npm run check:bundle
 ```
 
 The bundle command runs Wrangler without deploying.
+
+Run `npm run format` to format source files, tests and JSON configuration with Prettier.
 
 ## Development principles
 
