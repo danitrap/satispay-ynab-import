@@ -265,3 +265,97 @@ test("telemetry records only bounded operation/outcome labels and elapsed durati
     }).pipe(Effect.provideService(Metric.MetricRegistry, registry)),
   );
 });
+
+test("telemetry uses monotonic duration and records failures, defects and interruptions", async () => {
+  const registry = new Map();
+  const baseClock = Effect.runSync(Clock.Clock);
+  let wall = 1_000_000_000n;
+  let monotonic = 0n;
+  const clock = {
+    ...baseClock,
+    currentTimeNanosUnsafe: () => wall,
+    currentTimeNanos: Effect.sync(() => wall),
+    monotonicTimeNanosUnsafe: () => monotonic,
+    monotonicTimeNanos: Effect.sync(() => monotonic),
+  };
+  for (const outcome of [
+    Effect.void,
+    Effect.fail("expected"),
+    Effect.die("bug"),
+    Effect.interrupt,
+  ]) {
+    await Effect.runPromiseExit(
+      Effect.andThen(
+        Effect.sync(() => {
+          wall -= 100_000_000n;
+          monotonic += 25_000_000n;
+        }),
+        outcome,
+      ).pipe(
+        observeOperation("upload"),
+        Effect.provideService(Clock.Clock, clock),
+        Effect.provideService(Metric.MetricRegistry, registry),
+      ),
+    );
+  }
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const duration = yield* Metric.value(
+        Metric.withAttributes(operationDuration, { operation: "upload" }),
+      );
+      assert.equal(duration.count, 4);
+      assert.equal(duration.sum, 100);
+      const failures = yield* Metric.value(
+        Metric.withAttributes(operationCount, { operation: "upload", outcome: "failure" }),
+      );
+      assert.equal(failures.count, 3);
+      const successes = yield* Metric.value(
+        Metric.withAttributes(operationCount, { operation: "upload", outcome: "success" }),
+      );
+      assert.equal(successes.count, 1);
+    }).pipe(Effect.provideService(Metric.MetricRegistry, registry)),
+  );
+});
+
+test("malformed YNAB envelopes and payloads keep read and uncertain write failures without retries", async () => {
+  for (const [body, readReason, writeReason] of [
+    ["invalid JSON", "Json", "Json"],
+    ["null", "Json", "Json"],
+    ["{}", "Json", "Json"],
+    [JSON.stringify({ data: null }), "Json", "Json"],
+    [JSON.stringify({ data: false }), "Json", "Json"],
+    [JSON.stringify({ data: {} }), "Plans", "Contract"],
+  ]) {
+    let reads = 0;
+    const readError = await Effect.runPromise(
+      findAccountsEffect.pipe(
+        Effect.provide(
+          requestLiveLayer(env, async () => {
+            reads++;
+            return new Response(body);
+          }),
+        ),
+        Effect.flip,
+      ),
+    );
+    assert.equal(readError._tag, "YnabResponseError");
+    assert.equal(readError.reason, readReason);
+    assert.equal(reads, 1);
+    let writes = 0;
+    const writeError = await Effect.runPromise(
+      importPlanEffect(plan).pipe(
+        Effect.provide(
+          requestLiveLayer(env, async (_url, init) => {
+            if (init.method === "GET") return Response.json({ data: { account } });
+            writes++;
+            return new Response(body);
+          }),
+        ),
+        Effect.flip,
+      ),
+    );
+    assert.equal(writeError._tag, "YnabImportUncertainError");
+    assert.deepEqual(writeError.reason, { _tag: writeReason });
+    assert.equal(writes, 1);
+  }
+});

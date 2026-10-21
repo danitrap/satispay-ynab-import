@@ -87,3 +87,9 @@ export class ImportFailedError extends Data.TaggedError("ImportFailedError")<{
     return this.reason.message;
   }
 }
+
+export class WorkbookError extends Data.TaggedError("WorkbookError")<{ readonly message: string }> {
+  constructor(message: string) {
+    super({ message });
+  }
+}

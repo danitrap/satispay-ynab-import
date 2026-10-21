@@ -117,8 +117,8 @@ const decodeMultipartEffect = (body: Uint8Array, contentType: string) =>
   });
 
 /** Request adapter: there is a single Effect runtime boundary per incoming request. */
-export function handleRequestEffect(request: Request) {
-  return Effect.gen(function* () {
+export const handleRequestEffect = Effect.fnUntraced(
+  function* (request: Request) {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health")
       return json({
@@ -257,60 +257,62 @@ export function handleRequestEffect(request: Request) {
       imported: 0,
       message: "CSV received and parsed. Nothing sent to YNAB.",
     });
-  }).pipe(
-    Effect.catchTags({
-      UploadError: (error) =>
-        Effect.succeed(json({ ok: false, error: error.message }, error.status)),
-      ConfigurationError: (error) =>
-        Effect.succeed(
-          json(
-            {
-              ok: false,
-              error: error.message,
-              ...(isImportRequest(request) ? { imported: 0 } : {}),
-            },
-            409,
+  },
+  (effect, request) =>
+    effect.pipe(
+      Effect.catchTags({
+        UploadError: (error) =>
+          Effect.succeed(json({ ok: false, error: error.message }, error.status)),
+        ConfigurationError: (error) =>
+          Effect.succeed(
+            json(
+              {
+                ok: false,
+                error: error.message,
+                ...(isImportRequest(request) ? { imported: 0 } : {}),
+              },
+              409,
+            ),
           ),
-        ),
-      WorkbookError: (error) =>
-        Effect.succeed(
-          json(
-            {
-              ok: false,
-              error: error.message,
-              ...(isImportRequest(request) ? { imported: 0 } : {}),
-            },
-            422,
+        WorkbookError: (error) =>
+          Effect.succeed(
+            json(
+              {
+                ok: false,
+                error: error.message,
+                ...(isImportRequest(request) ? { imported: 0 } : {}),
+              },
+              422,
+            ),
           ),
-        ),
-      ImportPlanError: (error) =>
-        Effect.succeed(json({ ok: false, error: error.message, imported: 0 }, 422)),
-      ImportBlockedError: (error) =>
-        Effect.succeed(
-          json(
-            {
-              ok: false,
-              mode: "import-blocked",
-              ...error.summary,
-              imported: 0,
-              error: error.message,
-            },
-            422,
+        ImportPlanError: (error) =>
+          Effect.succeed(json({ ok: false, error: error.message, imported: 0 }, 422)),
+        ImportBlockedError: (error) =>
+          Effect.succeed(
+            json(
+              {
+                ok: false,
+                mode: "import-blocked",
+                ...error.summary,
+                imported: 0,
+                error: error.message,
+              },
+              422,
+            ),
           ),
-        ),
-      ImportFailedError: (error) =>
-        Effect.succeed(
-          json(
-            { ok: false, mode: "import-failed", ...error.summary, error: error.message },
-            ynabFailureStatus(error.reason),
+        ImportFailedError: (error) =>
+          Effect.succeed(
+            json(
+              { ok: false, mode: "import-failed", ...error.summary, error: error.message },
+              ynabFailureStatus(error.reason),
+            ),
           ),
-        ),
-      YnabTransportError: ynabFailureResponse,
-      YnabHttpError: ynabFailureResponse,
-      YnabResponseError: ynabFailureResponse,
-    }),
-  );
-}
+        YnabTransportError: ynabFailureResponse,
+        YnabHttpError: ynabFailureResponse,
+        YnabResponseError: ynabFailureResponse,
+      }),
+    ),
+);
 
 export default {
   fetch(request: Request, env: Env): Promise<Response> {

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Cause, Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
+import { readSheetEffect, WorkbookError } from "../src/spreadsheet.ts";
 import { WorkbookReader } from "../src/workbook-reader.ts";
 import { importPlanEffect, requestLiveLayer } from "../src/ynab-service.ts";
 import { ImportFailedError, YnabImportUncertainError } from "../src/errors.ts";
@@ -16,7 +17,7 @@ const analyzeRows = (route, rows) =>
       body: new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
     }),
   ).pipe(
-    Effect.provideService(WorkbookReader, { read: async () => rows }),
+    Effect.provideService(WorkbookReader, { read: () => Effect.succeed(rows) }),
     Effect.provide(requestLiveLayer({ UPLOAD_TOKEN: "upload" })),
   );
 
@@ -110,4 +111,23 @@ test("an import posts only to the target snapshot that was validated", async () 
   assert.equal(result.processed, 1);
   assert.equal(targetReads, 1);
   assert.equal(submitted[0].transactions[0].account_id, "wallet");
+});
+
+test("workbook service preserves declared failures and unexpected defects", async () => {
+  const error = new WorkbookError("Cannot parse XLSX workbook. Check the exported Excel file.");
+  const failure = await Effect.runPromise(
+    readSheetEffect(new ArrayBuffer(0)).pipe(
+      Effect.provideService(WorkbookReader, { read: () => Effect.fail(error) }),
+      Effect.flip,
+    ),
+  );
+  assert.equal(failure, error);
+  const defect = new TypeError("decoder implementation bug");
+  const exit = await Effect.runPromiseExit(
+    readSheetEffect(new ArrayBuffer(0)).pipe(
+      Effect.provideService(WorkbookReader, { read: () => Effect.die(defect) }),
+    ),
+  );
+  assert.equal(exit._tag, "Failure");
+  assert.equal(Cause.findDefect(exit.cause).success, defect);
 });

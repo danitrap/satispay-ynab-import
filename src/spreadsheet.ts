@@ -1,7 +1,9 @@
 import { PlanInputError, WorksheetInputError } from "./domain.ts";
 import { WorkbookReader } from "./workbook-reader.ts";
 import { observeOperation } from "./telemetry.ts";
-import { Data, Effect } from "effect";
+import { WorkbookError } from "./errors.ts";
+export { WorkbookError } from "./errors.ts";
+import { Effect } from "effect";
 import { previewSatispay } from "./preview.ts";
 
 /** Inspection-only Satispay worksheet diagnostics. No transaction-level details leave the Worker. */
@@ -123,19 +125,10 @@ export function summarizeSheet(rows: SheetCell[][]) {
     },
   };
 }
-export class WorkbookError extends Data.TaggedError("WorkbookError")<{ readonly message: string }> {
-  constructor(message: string) {
-    super({ message });
-  }
-}
-
 /** Untrusted xlsx decoding happens at the I/O boundary, errors remain typed. */
 export const readSheetEffect = Effect.fn("satispay.workbook")(function* (file: ArrayBuffer) {
   const reader = yield* WorkbookReader;
-  return yield* Effect.tryPromise({
-    try: () => reader.read(file),
-    catch: () => new WorkbookError("Cannot parse XLSX workbook. Check the exported Excel file."),
-  });
+  return yield* reader.read(file);
 }, observeOperation("workbook"));
 
 /** Normalize only declared input errors; preserve the identity of unexpected defects. */
