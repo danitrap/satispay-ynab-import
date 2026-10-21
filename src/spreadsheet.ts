@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import { previewSatispay } from "./preview.ts";
 
 /** Inspection-only Satispay worksheet diagnostics. No transaction-level details leave the Worker. */
@@ -120,11 +120,9 @@ export function summarizeSheet(rows: SheetCell[][]) {
     },
   };
 }
-export class WorkbookError extends Error {
-  readonly _tag = "WorkbookError";
+export class WorkbookError extends Data.TaggedError("WorkbookError")<{ readonly message: string }> {
   constructor(message: string) {
-    super(message);
-    this.name = "WorkbookError";
+    super({ message });
   }
 }
 

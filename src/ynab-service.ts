@@ -1,19 +1,22 @@
 import { Context, Effect, Layer } from "effect";
+import { AppConfig, appConfigLayer, type YnabEnv } from "./config.ts";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import type { ImportPlan } from "./import-plan.ts";
 import {
   findSatispayAccountsEffect,
   sendToYnabEffect,
   validateTargetAccountEffect,
-  type YnabEnv,
 } from "./ynab.ts";
 
-type WithoutHttp<T> = T extends Effect.Effect<infer A, infer E, any> ? Effect.Effect<A, E> : never;
+type WithoutDependencies<T> =
+  T extends Effect.Effect<infer A, infer E, any> ? Effect.Effect<A, E> : never;
 
 export type YnabServiceApi = {
-  readonly findAccounts: WithoutHttp<ReturnType<typeof findSatispayAccountsEffect>>;
-  readonly validateAccount: WithoutHttp<ReturnType<typeof validateTargetAccountEffect>>;
-  readonly importPlan: (plan: ImportPlan) => WithoutHttp<ReturnType<typeof sendToYnabEffect>>;
+  readonly findAccounts: WithoutDependencies<ReturnType<typeof findSatispayAccountsEffect>>;
+  readonly validateAccount: WithoutDependencies<ReturnType<typeof validateTargetAccountEffect>>;
+  readonly importPlan: (
+    plan: ImportPlan,
+  ) => WithoutDependencies<ReturnType<typeof sendToYnabEffect>>;
 };
 
 export class YnabService extends Context.Service<YnabService, YnabServiceApi>()(
@@ -24,31 +27,28 @@ export class YnabService extends Context.Service<YnabService, YnabServiceApi>()(
 /** Build the application service from an injected Effect HttpClient.
  * No request starts until an Effect in the service is evaluated.
  */
-export const ynabHttpLayer = (env: YnabEnv) =>
-  Layer.effect(
-    YnabService,
-    Effect.gen(function* () {
-      const http = yield* HttpClient.HttpClient;
-      return {
-        findAccounts: Effect.provideService(
-          findSatispayAccountsEffect(env),
-          HttpClient.HttpClient,
-          http,
-        ),
-        validateAccount: Effect.provideService(
-          validateTargetAccountEffect(env),
-          HttpClient.HttpClient,
-          http,
-        ),
-        importPlan: (plan: ImportPlan) =>
-          Effect.provideService(sendToYnabEffect(plan, env), HttpClient.HttpClient, http),
-      };
-    }),
-  );
+export const ynabHttpLayer = Layer.effect(
+  YnabService,
+  Effect.gen(function* () {
+    const http = yield* HttpClient.HttpClient;
+    const config = yield* AppConfig;
+    const provide = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient | AppConfig>) =>
+      effect.pipe(
+        Effect.provideService(HttpClient.HttpClient, http),
+        Effect.provideService(AppConfig, config),
+      );
+    return {
+      findAccounts: provide(findSatispayAccountsEffect()),
+      validateAccount: provide(validateTargetAccountEffect()),
+      importPlan: (plan: ImportPlan) => provide(sendToYnabEffect(plan)),
+    };
+  }),
+);
 
 /** Cloudflare fetch transport is created and disposed within each request. */
 export const ynabLiveLayer = (env: YnabEnv, fetchFn: typeof fetch = fetch) =>
-  ynabHttpLayer(env).pipe(
+  ynabHttpLayer.pipe(
+    Layer.provideMerge(appConfigLayer(env)),
     Layer.provide(
       FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchFn))),
     ),

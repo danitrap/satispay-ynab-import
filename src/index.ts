@@ -1,22 +1,22 @@
-import { Effect } from "effect";
+import { Data, Effect, Redacted } from "effect";
+import { AppConfig, appConfigLayer, type AppEnv } from "./config.ts";
 import { decodeCsv, parseCsv } from "./csv.ts";
 import { inspectXlsxEffect, previewXlsxEffect } from "./spreadsheet.ts";
 import { processImportEffect } from "./import-handler.ts";
-import type { YnabEnv } from "./ynab.ts";
+import type { YnabFailure } from "./errors.ts";
 import { findAccountsEffect, ynabLiveLayer } from "./ynab-service.ts";
 
-type Env = { UPLOAD_TOKEN: string } & YnabEnv;
+type Env = AppEnv;
 const MAX_FILE_BYTES = 4_000_000;
 const MAX_REQUEST_BYTES = 4_500_000;
 const UPLOAD_PATHS = new Set(["/inspect", "/preview", "/prepare", "/import"]);
 
-class UploadError extends Error {
-  readonly _tag = "UploadError";
+class UploadError extends Data.TaggedError("UploadError")<{
+  readonly message: string;
   readonly status: number;
+}> {
   constructor(message: string, status = 400) {
-    super(message);
-    this.name = "UploadError";
-    this.status = status;
+    super({ message, status });
   }
 }
 const json = (body: unknown, status = 200) =>
@@ -28,6 +28,25 @@ const json = (body: unknown, status = 200) =>
       "X-Content-Type-Options": "nosniff",
     },
   });
+
+const isImportRequest = (request: Request) =>
+  ["/prepare", "/import"].includes(new URL(request.url).pathname);
+
+function ynabFailureStatus(error: YnabFailure): number {
+  switch (error._tag) {
+    case "ConfigurationError":
+      return 409;
+    case "YnabWriteDisabledError":
+      return 403;
+    case "YnabAccountError":
+    case "YnabImportRejectedError":
+      return 422;
+    default:
+      return 502;
+  }
+}
+const ynabFailureResponse = (error: YnabFailure) =>
+  Effect.succeed(json({ ok: false, error: error.message }, ynabFailureStatus(error)));
 
 /** Bounded upload reads: also protect requests without Content-Length. */
 const readRequestBodyEffect = (request: Request) =>
@@ -99,17 +118,18 @@ export function handleRequestEffect(request: Request, env: Env) {
     const listAccounts = request.method === "GET" && url.pathname === "/ynab/accounts";
     const upload = request.method === "POST" && UPLOAD_PATHS.has(url.pathname);
     if (!listAccounts && !upload) return json({ ok: false, error: "Not found" }, 404);
-    if (
-      !env.UPLOAD_TOKEN ||
-      request.headers.get("Authorization") !== "Bearer " + env.UPLOAD_TOKEN
-    ) {
+    const config = yield* AppConfig;
+    const uploadToken = yield* config.uploadToken.pipe(
+      Effect.catchTag("ConfigurationError", () =>
+        Effect.fail(new UploadError("Unauthorized", 401)),
+      ),
+    );
+    if (request.headers.get("Authorization") !== "Bearer " + Redacted.value(uploadToken)) {
       return json({ ok: false, error: "Unauthorized" }, 401);
     }
     if (listAccounts) {
-      return yield* findAccountsEffect.pipe(
-        Effect.map((accounts) => json({ ok: true, ...accounts })),
-        Effect.catch((e) => Effect.succeed(json({ ok: false, error: e.message }, 502))),
-      );
+      const accounts = yield* findAccountsEffect;
+      return json({ ok: true, ...accounts });
     }
     if (url.pathname === "/import" && request.headers.get("X-Confirm-Import") !== "yes") {
       return json(
@@ -127,23 +147,12 @@ export function handleRequestEffect(request: Request, env: Env) {
     if (contentLength > MAX_REQUEST_BYTES)
       return json({ ok: false, error: "Upload too large" }, 413);
 
-    const requestBytes = yield* readRequestBodyEffect(request).pipe(
-      Effect.map((bytes) => ({ ok: true as const, bytes })),
-      Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
-    );
-    if (!requestBytes.ok)
-      return json({ ok: false, error: requestBytes.error.message }, requestBytes.error.status);
-    let bytes = requestBytes.bytes;
+    let bytes = yield* readRequestBodyEffect(request);
     let fileName = "shared-file";
     if (contentType.toLowerCase().startsWith("multipart/form-data")) {
-      const multipart = yield* decodeMultipartEffect(bytes, contentType).pipe(
-        Effect.map((result) => ({ ok: true as const, result })),
-        Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
-      );
-      if (!multipart.ok)
-        return json({ ok: false, error: multipart.error.message }, multipart.error.status);
-      bytes = multipart.result.bytes;
-      fileName = multipart.result.fileName;
+      const multipart = yield* decodeMultipartEffect(bytes, contentType);
+      bytes = multipart.bytes;
+      fileName = multipart.fileName;
     } else if (/application\/(json|x-www-form-urlencoded)/i.test(contentType)) {
       return json(
         {
@@ -170,52 +179,46 @@ export function handleRequestEffect(request: Request, env: Env) {
         const result = yield* processImportEffect(
           url.pathname === "/import" ? "import" : "prepare",
           bytes.buffer as ArrayBuffer,
-          env,
         );
-        return json(result.body, result.status);
+        if (result._tag === "ImportPrepared") {
+          return json({
+            ok: true,
+            mode: "import-preview",
+            ...result.summary,
+            imported: 0,
+            message: "No transactions have been sent to YNAB",
+          });
+        }
+        return json({
+          ok: true,
+          mode: "import-completed",
+          ...result.summary,
+          ...result.result,
+          imported: result.result.processed,
+          message:
+            "YNAB processed the batch (new or matched transactions). Review and reconcile Satispay in YNAB.",
+        });
       }
       if (preview) {
-        return yield* previewXlsxEffect(bytes.buffer as ArrayBuffer).pipe(
-          Effect.map((data) =>
-            json({
-              ok: true,
-              format: "xlsx",
-              fileName,
-              ...data,
-              imported: 0,
-              message: "Dry run only: nothing sent to YNAB.",
-            }),
-          ),
-          Effect.catch(() =>
-            Effect.succeed(
-              json(
-                { ok: false, error: "Cannot parse XLSX workbook. Check the exported Excel file." },
-                422,
-              ),
-            ),
-          ),
-        );
+        const data = yield* previewXlsxEffect(bytes.buffer as ArrayBuffer);
+        return json({
+          ok: true,
+          format: "xlsx",
+          fileName,
+          ...data,
+          imported: 0,
+          message: "Dry run only: nothing sent to YNAB.",
+        });
       }
-      return yield* inspectXlsxEffect(bytes.buffer as ArrayBuffer).pipe(
-        Effect.map((data) =>
-          json({
-            ok: true,
-            format: "xlsx",
-            fileName,
-            ...data,
-            imported: 0,
-            message: "Excel received and parsed. Nothing sent to YNAB.",
-          }),
-        ),
-        Effect.catch(() =>
-          Effect.succeed(
-            json(
-              { ok: false, error: "Cannot parse XLSX workbook. Check the exported Excel file." },
-              422,
-            ),
-          ),
-        ),
-      );
+      const data = yield* inspectXlsxEffect(bytes.buffer as ArrayBuffer);
+      return json({
+        ok: true,
+        format: "xlsx",
+        fileName,
+        ...data,
+        imported: 0,
+        message: "Excel received and parsed. Nothing sent to YNAB.",
+      });
     }
     if (
       fileName.toLowerCase().endsWith(".xlsx") ||
@@ -225,26 +228,77 @@ export function handleRequestEffect(request: Request, env: Env) {
     }
     if (preview || importPath)
       return json({ ok: false, error: "Preview/import supports XLSX only" }, 415);
-    return yield* Effect.try({
+    const parsed = yield* Effect.try({
       try: () => parseCsv(decodeCsv(bytes)),
       catch: (e) => new UploadError(e instanceof Error ? e.message : "CSV parse error", 422),
-    }).pipe(
-      Effect.map((parsed) =>
-        json({
-          ok: true,
-          mode: "inspect-only",
-          fileName,
-          delimiter: parsed.delimiter === "\t" ? "TAB" : parsed.delimiter,
-          columns: parsed.headers,
-          format: "csv",
-          rowCount: parsed.rows.length,
-          imported: 0,
-          message: "CSV received and parsed. Nothing sent to YNAB.",
-        }),
-      ),
-      Effect.catch((e) => Effect.succeed(json({ ok: false, error: e.message }, e.status))),
-    );
-  });
+    });
+    return json({
+      ok: true,
+      mode: "inspect-only",
+      fileName,
+      delimiter: parsed.delimiter === "\t" ? "TAB" : parsed.delimiter,
+      columns: parsed.headers,
+      format: "csv",
+      rowCount: parsed.rows.length,
+      imported: 0,
+      message: "CSV received and parsed. Nothing sent to YNAB.",
+    });
+  }).pipe(
+    Effect.catchTags({
+      UploadError: (error) =>
+        Effect.succeed(json({ ok: false, error: error.message }, error.status)),
+      ConfigurationError: (error) =>
+        Effect.succeed(
+          json(
+            {
+              ok: false,
+              error: error.message,
+              ...(isImportRequest(request) ? { imported: 0 } : {}),
+            },
+            409,
+          ),
+        ),
+      WorkbookError: (error) =>
+        Effect.succeed(
+          json(
+            {
+              ok: false,
+              error: error.message,
+              ...(isImportRequest(request) ? { imported: 0 } : {}),
+            },
+            422,
+          ),
+        ),
+      ImportPlanError: (error) =>
+        Effect.succeed(json({ ok: false, error: error.message, imported: 0 }, 422)),
+      ImportBlockedError: (error) =>
+        Effect.succeed(
+          json(
+            {
+              ok: false,
+              mode: "import-blocked",
+              ...error.summary,
+              imported: 0,
+              error: error.message,
+            },
+            422,
+          ),
+        ),
+      ImportFailedError: (error) =>
+        Effect.succeed(
+          json(
+            { ok: false, mode: "import-failed", ...error.summary, error: error.message },
+            ynabFailureStatus(error.reason),
+          ),
+        ),
+      YnabError: ynabFailureResponse,
+      YnabTransportError: ynabFailureResponse,
+      YnabHttpError: ynabFailureResponse,
+      YnabResponseError: ynabFailureResponse,
+      YnabImportUncertainError: ynabFailureResponse,
+    }),
+    Effect.provide(appConfigLayer(env)),
+  );
 }
 
 export default {

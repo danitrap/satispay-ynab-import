@@ -187,3 +187,48 @@ test("Effect preserves input ordering when hashing imported IDs concurrently", a
   );
   assert.equal(new Set(transactions.map((t) => t.import_id)).size, rows.length);
 });
+
+test("a lost POST response is a typed uncertain import and is never retried", async () => {
+  let writes = 0;
+  const fetchFn = async (_url, options) => {
+    if (options.method === "GET") {
+      return Response.json({
+        data: { account: { id: "target", name: "Satispay", closed: false, on_budget: true } },
+      });
+    }
+    writes++;
+    throw new Error("transport details must stay private");
+  };
+  const error = await Effect.runPromise(
+    importPlanEffect({
+      counts: { rejected: 0 },
+      candidates: [
+        {
+          satispayId: "unique",
+          date: "2026-10-18",
+          payee: "Shop",
+          memo: "",
+          amountMilliunits: -1000,
+          type: "Altro",
+        },
+      ],
+    }).pipe(
+      Effect.provide(
+        ynabLiveLayer(
+          {
+            YNAB_TOKEN: "test",
+            YNAB_PLAN_ID: "plan",
+            YNAB_ACCOUNT_ID: "target",
+            YNAB_WRITE_ENABLED: "true",
+          },
+          fetchFn,
+        ),
+      ),
+      Effect.flip,
+    ),
+  );
+  assert.equal(error._tag, "YnabImportUncertainError");
+  assert.match(error.message, /verify|Check import status/i);
+  assert.equal(error.message.includes("transport details"), false);
+  assert.equal(writes, 1);
+});

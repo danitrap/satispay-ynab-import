@@ -230,6 +230,10 @@ All responses are JSON. Every endpoint except `GET /health` requires `Authorizat
 
 `/import` also requires `X-Confirm-Import: yes` and `YNAB_WRITE_ENABLED = "true"`. It checks that the destination account is active, on-budget, and named Satispay before writing.
 
+Configuration is validated only when an operation needs it. `/health` needs no credentials; `/inspect` and `/preview` need only `UPLOAD_TOKEN`; `/prepare` also needs a real calendar date in `YNAB_IMPORT_FROM`. Account discovery needs `YNAB_TOKEN`, and imports additionally need target plan/account IDs and an enabled write switch. An absent write switch defaults to disabled; its accepted values are exactly `"true"` and `"false"`.
+
+Authenticated configuration failures return HTTP **409**, disabled writes return **403**, and invalid workbooks, blocked movements or unsuitable destination accounts return **422**. YNAB transport/response failures return **502**. Import failures retain their existing `mode`, summary and `error` fields. If the POST outcome is uncertain, the error asks you to verify the import in YNAB before repeating it.
+
 ### Reading the result
 
 ~~~json
@@ -308,6 +312,8 @@ The code separates **pure financial calculations** from **effectful I/O**.
 
 ~~~text
 src/
+├── config.ts          Request-scoped, lazily validated Cloudflare bindings
+├── errors.ts          Tagged application failures and import diagnostics
 ├── index.ts           Worker routes, authorization, bounded uploads
 ├── spreadsheet.ts     XLSX decoding and workbook inspection
 ├── csv.ts             CSV inspection
@@ -323,10 +329,12 @@ The Worker uses [Effect v4](https://effect.website/) throughout its asynchronous
 
 - **`Effect.gen`** composes file decoding, validation and remote API calls with typed errors.
 - **`Context.Service`** declares the `YnabService` required by import and account-discovery operations.
+- **`Config` + `Schema`** validate operation-specific settings from Cloudflare bindings; `Redacted` keeps decoded tokens out of ordinary diagnostic output. Configuration failures retain only the setting name and a safe message.
 - **`Layer`** provides the HTTP-backed implementation at the Worker request boundary. `ynabTestLayer` replaces it with an in-memory service in tests.
 - **Effect `HttpClient` + `FetchHttpClient`** run YNAB API requests using a fetch-compatible transport suitable for Cloudflare Workers.
 - **`Schema.decodeUnknownEffect`** validates incoming YNAB JSON instead of trusting untyped responses.
 - **`Effect.forEach`** produces stable SHA-256 import IDs with bounded concurrency.
+- **`Data.TaggedError` + `Effect.catchTags`** distinguish configuration, validation, transport and uncertain import failures. The import pipeline returns tagged application outcomes; the router owns HTTP status codes and JSON responses.
 
 The domain modules stay independent of Effect. There is no global runtime holding Cloudflare request credentials; the live service Layer is provided per request.
 
