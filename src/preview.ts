@@ -1,3 +1,11 @@
+import {
+  calendarDate,
+  centsToMilliunits,
+  makeCents,
+  PlanInputError,
+  type Cents,
+  type Milliunits,
+} from "./domain.ts";
 /** A conservative, side-effect-free proposed YNAB import plan for Satispay. */
 import { analyzeLedger } from "./ledger.ts";
 export type Cell = string | number | boolean | Date | null | undefined;
@@ -5,27 +13,25 @@ export type PreviewRow = {
   decision: "include" | "skip" | "review";
   reason: string;
   type: string;
-  amountMilliunits?: number;
+  amountMilliunits?: Milliunits;
 };
 
 function cellText(value: Cell): string {
   return value === undefined || value === null ? "" : String(value).trim();
 }
-function asCents(value: Cell): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  const cents = Math.round(value * 100);
-  if (Math.abs(value * 100 - cents) > 0.0001 || !Number.isSafeInteger(cents)) return null;
-  return cents;
-}
 function isValidDate(value: Cell): boolean {
   if (value instanceof Date) return !Number.isNaN(value.getTime());
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return false;
-  const date = new Date(value.trim() + "T00:00:00.000Z");
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value.trim();
+  return typeof value === "string" && calendarDate(value.trim()) !== null;
+}
+function totalMilliunits(value: number): Milliunits {
+  const cents = makeCents(value);
+  const result = cents === null ? null : centsToMilliunits(cents);
+  if (result === null) throw new PlanInputError("AmountOverflow");
+  return result;
 }
 function classify(
   type: string,
-  amountCents: number,
+  amountCents: Cents,
   status: string,
   dateValid: boolean,
   validId: boolean,
@@ -33,11 +39,13 @@ function classify(
   if (!validId) return { decision: "review", reason: "missing_or_duplicate_id", type };
   if (!dateValid) return { decision: "review", reason: "invalid_date", type };
   if (status !== "✅ Approvato") return { decision: "review", reason: "not_approved", type };
+  const amount = centsToMilliunits(amountCents);
+  if (amount === null) return { decision: "review", reason: "invalid_availability_amount", type };
   return {
     decision: "include",
     reason: amountCents < 0 ? "wallet_outflow" : "wallet_inflow",
     type,
-    amountMilliunits: amountCents * 10,
+    amountMilliunits: amount,
   };
 }
 
@@ -93,6 +101,8 @@ export function previewSatispay(rows: Cell[][]) {
     if (result.decision === "include") {
       if (amountCents! < 0) outflowCents += -amountCents!;
       else inflowCents += amountCents!;
+      totalMilliunits(outflowCents);
+      totalMilliunits(inflowCents);
     }
   }
   const count = (decision: PreviewRow["decision"]) =>
@@ -112,9 +122,9 @@ export function previewSatispay(rows: Cell[][]) {
     outflowEur: money(outflowCents),
     inflowEur: money(inflowCents),
     netEur: money(inflowCents - outflowCents),
-    outflowMilliunits: outflowCents * 10,
-    inflowMilliunits: inflowCents * 10,
-    netMilliunits: (inflowCents - outflowCents) * 10,
+    outflowMilliunits: totalMilliunits(outflowCents),
+    inflowMilliunits: totalMilliunits(inflowCents),
+    netMilliunits: totalMilliunits(inflowCents - outflowCents),
     byType: Object.fromEntries([...byType.entries()]),
     byReason: Object.fromEntries([...byReason.entries()]),
     refundsAdjusted: ledger.refundsAdjusted,

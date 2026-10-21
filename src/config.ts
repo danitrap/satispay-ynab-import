@@ -1,3 +1,4 @@
+import { CalendarDateSchema, YnabAccountIdSchema, YnabPlanIdSchema } from "./domain-schema.ts";
 import { Config, ConfigProvider, Context, Data, Effect, Layer, Schema } from "effect";
 
 /** Cloudflare bindings are read only at the request adapter. */
@@ -17,13 +18,6 @@ export class ConfigurationError extends Data.TaggedError("ConfigurationError")<{
 
 const NonEmptyString = Schema.Trimmed.check(Schema.isMinLength(1));
 const Secret = Schema.Redacted(NonEmptyString);
-const ImportDate = NonEmptyString.check(
-  Schema.makeFilter((value) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-    const date = new Date(value + "T00:00:00.000Z");
-    return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
-  }),
-);
 
 function makeConfig(env: AppEnv) {
   const provider = ConfigProvider.fromUnknown(env, { preserveEmptyStrings: true });
@@ -40,12 +34,12 @@ function makeConfig(env: AppEnv) {
   const target = Effect.all({
     token,
     planId: read(
-      Config.schema(NonEmptyString, "YNAB_PLAN_ID"),
+      Config.schema(YnabPlanIdSchema, "YNAB_PLAN_ID"),
       "YNAB_PLAN_ID",
       "Set YNAB_PLAN_ID and YNAB_ACCOUNT_ID",
     ),
     accountId: read(
-      Config.schema(NonEmptyString, "YNAB_ACCOUNT_ID"),
+      Config.schema(YnabAccountIdSchema, "YNAB_ACCOUNT_ID"),
       "YNAB_ACCOUNT_ID",
       "Set YNAB_PLAN_ID and YNAB_ACCOUNT_ID",
     ),
@@ -59,7 +53,7 @@ function makeConfig(env: AppEnv) {
     token,
     target,
     importFrom: read(
-      Config.schema(ImportDate, "YNAB_IMPORT_FROM"),
+      Config.schema(CalendarDateSchema, "YNAB_IMPORT_FROM"),
       "YNAB_IMPORT_FROM",
       "Configure YNAB_IMPORT_FROM (YYYY-MM-DD) to exclude previously reconciled history",
     ),

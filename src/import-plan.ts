@@ -1,10 +1,20 @@
+import {
+  calendarDate,
+  centsToMilliunits,
+  makeMilliunits,
+  satispayTransactionId,
+  PlanInputError,
+  type CalendarDate,
+  type Milliunits,
+  type SatispayTransactionId,
+} from "./domain.ts";
 import type { SheetCell } from "./spreadsheet.ts";
 import { analyzeLedger } from "./ledger.ts";
 
 export type ImportCandidate = {
-  satispayId: string;
-  date: string;
-  amountMilliunits: number;
+  satispayId: SatispayTransactionId;
+  date: CalendarDate;
+  amountMilliunits: Milliunits;
   payee: string;
   memo: string;
   type: string;
@@ -19,10 +29,10 @@ export type ImportPlan = {
     inScope: number;
   };
   issues: Record<string, number>;
-  fromDate: string;
-  inflowMilliunits: number;
-  outflowMilliunits: number;
-  netMilliunits: number;
+  fromDate: CalendarDate;
+  inflowMilliunits: Milliunits;
+  outflowMilliunits: Milliunits;
+  netMilliunits: Milliunits;
   refundsAdjusted: number;
   refundsUnresolved: number;
   balanceCheck: ReturnType<typeof analyzeLedger>["balanceCheck"];
@@ -31,35 +41,25 @@ export type ImportPlan = {
 function text(v: SheetCell): string {
   return v === undefined || v === null ? "" : String(v).trim();
 }
-function isDateString(d: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
-  const date = new Date(d + "T00:00:00.000Z");
-  return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === d;
-}
-export function parseDate(value: SheetCell): string | null {
+export function parseDate(value: SheetCell): CalendarDate | null {
   if (value instanceof Date && !Number.isNaN(value.valueOf()))
-    return value.toISOString().slice(0, 10);
+    return calendarDate(value.toISOString().slice(0, 10));
   const s = text(value);
-  return isDateString(s) ? s : null;
-}
-function asMilliunits(value: SheetCell): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  const cents = Math.round(value * 100);
-  if (Math.abs(value * 100 - cents) > 0.0001 || !Number.isSafeInteger(cents)) return null;
-  return cents * 10;
+  return calendarDate(s);
 }
 function safeLabel(s: string, fallback: string, maximum: number): string {
   return (s || fallback).slice(0, maximum);
 }
 export function buildImportPlan(rows: SheetCell[][], fromDate: string): ImportPlan {
-  if (!isDateString(fromDate)) throw new Error("Invalid YNAB_IMPORT_FROM: expected YYYY-MM-DD");
-  if (!rows.length) throw new Error("Empty Satispay spreadsheet");
+  const cutoff = calendarDate(fromDate);
+  if (!cutoff) throw new PlanInputError("InvalidCutoff");
+  if (!rows.length) throw new PlanInputError("EmptyWorkbook");
   const names = rows[0].map(text);
   const get = (name: string) => names.indexOf(name);
   const required = ["Data", "Nome", "Descrizione", "Importo", "Tipo", "Stato", "Disponibilità"];
-  if (required.some((n) => get(n) < 0)) throw new Error("Missing Satispay export columns");
+  if (required.some((n) => get(n) < 0)) throw new PlanInputError("MissingColumns");
   const idIndex = names.findIndex((n) => n === "ID" || n.startsWith("ID ("));
-  if (idIndex < 0) throw new Error("Missing Satispay transaction ID column");
+  if (idIndex < 0) throw new PlanInputError("MissingIdColumn");
   const data = rows.slice(1).filter((r) => r.some((cell) => text(cell) !== ""));
   const ledger = analyzeLedger([rows[0], ...data]);
   const counts = {
@@ -103,7 +103,7 @@ export function buildImportPlan(rows: SheetCell[][], fromDate: string): ImportPl
     const amount =
       resolution?.amountCents === null || resolution === undefined
         ? null
-        : resolution.amountCents * 10;
+        : centsToMilliunits(resolution.amountCents);
     if (amount === null) {
       issue("invalid_availability_amount");
       continue;
@@ -129,7 +129,7 @@ export function buildImportPlan(rows: SheetCell[][], fromDate: string): ImportPl
     const payee = rawPayee && rawPayee !== "-" ? rawPayee : fallbackPayee;
     const memo = text(row[get("Descrizione")]);
     candidates.push({
-      satispayId: id,
+      satispayId: satispayTransactionId(id)!,
       date,
       amountMilliunits: amount,
       payee:
@@ -147,15 +147,22 @@ export function buildImportPlan(rows: SheetCell[][], fromDate: string): ImportPl
   for (const candidate of candidates) {
     if (candidate.amountMilliunits > 0) inflowMilliunits += candidate.amountMilliunits;
     else outflowMilliunits += -candidate.amountMilliunits;
+    if (!Number.isSafeInteger(inflowMilliunits) || !Number.isSafeInteger(outflowMilliunits))
+      throw new PlanInputError("AmountOverflow");
   }
+  const inflow = makeMilliunits(inflowMilliunits);
+  const outflow = makeMilliunits(outflowMilliunits);
+  const net = makeMilliunits(inflowMilliunits - outflowMilliunits);
+  if (inflow === null || outflow === null || net === null)
+    throw new PlanInputError("AmountOverflow");
   return {
     candidates,
     counts,
     issues,
-    fromDate,
-    inflowMilliunits,
-    outflowMilliunits,
-    netMilliunits: inflowMilliunits - outflowMilliunits,
+    fromDate: cutoff,
+    inflowMilliunits: inflow,
+    outflowMilliunits: outflow,
+    netMilliunits: net,
     refundsAdjusted: ledger.refundsAdjusted,
     refundsUnresolved: ledger.refundsUnresolved,
     balanceCheck: ledger.balanceCheck,

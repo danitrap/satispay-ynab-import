@@ -1,3 +1,5 @@
+import type { PlanInputReason } from "./domain.ts";
+import { failureMessage } from "./failure-message.ts";
 import { Data } from "effect";
 import type { ConfigurationError } from "./config.ts";
 import type { summarizeImportPlan } from "./import-plan.ts";
@@ -11,27 +13,48 @@ export class YnabError extends Data.TaggedError("YnabError")<{ readonly message:
 }
 
 export class YnabTransportError extends Data.TaggedError("YnabTransportError")<{
-  readonly message: string;
-}> {}
+  readonly reason: "Network" | "Timeout";
+}> {
+  override get message(): string {
+    return failureMessage(this);
+  }
+}
 export class YnabHttpError extends Data.TaggedError("YnabHttpError")<{
   readonly status: number;
   readonly message: string;
 }> {}
 export class YnabResponseError extends Data.TaggedError("YnabResponseError")<{
-  readonly message: string;
-}> {}
+  readonly reason: "Json" | "Plans" | "Accounts";
+}> {
+  override get message(): string {
+    return failureMessage(this);
+  }
+}
 export class YnabAccountError extends Data.TaggedError("YnabAccountError")<{
-  readonly message: string;
-}> {}
+  readonly reason: "Malformed" | "WrongId" | "WrongName" | "OffBudget" | "Closed" | "Deleted";
+}> {
+  override get message(): string {
+    return failureMessage(this);
+  }
+}
 export class YnabWriteDisabledError extends Data.TaggedError("YnabWriteDisabledError")<{
   readonly message: string;
 }> {}
 export class YnabImportRejectedError extends Data.TaggedError("YnabImportRejectedError")<{
-  readonly message: string;
-}> {}
+  readonly reason: "AmbiguousMovements" | "BatchTooLarge";
+}> {
+  override get message(): string {
+    return failureMessage(this);
+  }
+}
 export class YnabImportUncertainError extends Data.TaggedError("YnabImportUncertainError")<{
-  readonly message: string;
-}> {}
+  readonly reason: "Network" | "Timeout" | "Http" | "Json" | "Contract" | "DuplicateCount";
+  readonly status?: number;
+}> {
+  override get message(): string {
+    return failureMessage(this);
+  }
+}
 
 export type YnabFailure =
   | ConfigurationError
@@ -45,8 +68,12 @@ export type YnabFailure =
   | YnabImportUncertainError;
 
 export class ImportPlanError extends Data.TaggedError("ImportPlanError")<{
-  readonly message: string;
-}> {}
+  readonly reason: PlanInputReason;
+}> {
+  override get message(): string {
+    return failureMessage(this);
+  }
+}
 export class ImportBlockedError extends Data.TaggedError("ImportBlockedError")<{
   readonly summary: ImportSummary;
   readonly message: string;

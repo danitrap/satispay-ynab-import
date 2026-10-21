@@ -1,0 +1,43 @@
+import type { Brand } from "effect";
+
+export type Cents = number & Brand.Brand<"Cents">;
+export type Milliunits = number & Brand.Brand<"Milliunits">;
+export type CalendarDate = string & Brand.Brand<"CalendarDate">;
+export type SatispayTransactionId = string & Brand.Brand<"SatispayTransactionId">;
+export type YnabAccountId = string & Brand.Brand<"YnabAccountId">;
+export type YnabPlanId = string & Brand.Brand<"YnabPlanId">;
+
+// Constructors are pure. Casts live only here, after validating the invariant.
+export const makeCents = (value: number): Cents | null =>
+  Number.isSafeInteger(value) ? (value as Cents) : null;
+export const makeMilliunits = (value: number): Milliunits | null =>
+  Number.isSafeInteger(value) ? (value as Milliunits) : null;
+export const centsToMilliunits = (value: Cents): Milliunits | null => makeMilliunits(value * 10);
+export const negateCents = (value: Cents): Cents => -value as Cents;
+
+export function parseCents(value: unknown): Cents | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const scaled = value * 100;
+  const rounded = Math.round(scaled);
+  return Math.abs(scaled - rounded) < 0.0001 ? makeCents(rounded) : null;
+}
+export function calendarDate(value: string): CalendarDate | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const parsed = new Date(value + "T00:00:00.000Z");
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value
+    ? (value as CalendarDate)
+    : null;
+}
+export const satispayTransactionId = (value: string): SatispayTransactionId | null =>
+  value.trim() ? (value.trim() as SatispayTransactionId) : null;
+
+export type PlanInputReason =
+  "InvalidCutoff" | "EmptyWorkbook" | "MissingColumns" | "MissingIdColumn" | "AmountOverflow";
+export class PlanInputError extends Error {
+  readonly _tag = "PlanInputError";
+  readonly reason: PlanInputReason;
+  constructor(reason: PlanInputReason) {
+    super(reason);
+    this.reason = reason;
+  }
+}
