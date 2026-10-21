@@ -317,6 +317,7 @@ src/
 ├── domain-schema.ts   Schema validation for branded boundary values
 ├── errors.ts          Tagged application failures and import diagnostics
 ├── failure-message.ts Safe presentation of structured failure reasons
+├── telemetry.ts       Operation timing and bounded outcome counters
 ├── index.ts           Worker routes, authorization, bounded uploads
 ├── spreadsheet.ts     XLSX decoding and workbook inspection
 ├── csv.ts             CSV inspection
@@ -347,6 +348,10 @@ The domain modules stay independent of Effect. There is no global runtime holdin
 Money units and identifiers have distinct branded types. Pure constructors check exact cents and safe milliunit conversions; unsafe movements are flagged for review, overflowing totals are rejected, and balance audits report unavailable when their arithmetic cannot remain exact. Schema validates calendar dates and target IDs at the request boundary. Failures carry structured reasons with safe, derived messages; only known plan-input errors are treated as invalid uploads, while unexpected planning exceptions remain defects.
 
 **No automatic retries of YNAB POST imports.** A response can be lost after YNAB accepts a request, so ambiguous results must be checked before retrying.
+
+Uploads use an Effect `Stream` with a 30-second deadline (HTTP 408 on expiry), bounded bytes, reader-lock release and body cancellation on failure or interruption. The Worker forwards the request's abort signal to the Effect runtime. Each YNAB attempt, including response-body decoding, has a 10-second deadline. GET transport failures and HTTP 502/503/504 get at most two retries, delayed by 200 ms and 400 ms; authentication, rate-limit and decoding failures are not retried. POST is always attempted once, and a timeout or server error preserves an uncertain outcome.
+
+Named `Effect.fn` spans cover workbook decoding, uploads, imports, account discovery and target validation. `satispay_operation_duration_ms` and `satispay_operations_total` record operation timing and success/failure with fixed labels; they contain no transaction arguments, credentials or error payloads. These metrics and spans are instrumentation hooks: exporting them to an external collector requires a separately configured exporter. Tests use Effect's `TestClock` to verify backoff and deadlines without real-time waits.
 
 ## Development
 
