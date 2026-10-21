@@ -5,7 +5,7 @@ import { YnabError } from "../src/ynab.ts";
 import {
   YnabService,
   ynabTestLayer,
-  ynabLiveLayer,
+  requestLiveLayer,
   findAccountsEffect,
   importPlanEffect,
 } from "../src/ynab-service.ts";
@@ -92,7 +92,7 @@ test("live Layer with fake transport rejects malformed YNAB account before any P
   return assert
     .rejects(
       Effect.runPromise(
-        importPlanEffect(populated).pipe(Effect.provide(ynabLiveLayer(env, mockFetch))),
+        importPlanEffect(populated).pipe(Effect.provide(requestLiveLayer(env, mockFetch))),
       ),
       /Target must be/,
     )
@@ -108,7 +108,9 @@ test("disabled live Layer prevents all network calls", () => {
   const env = { YNAB_WRITE_ENABLED: "false" };
   return assert
     .rejects(
-      Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(ynabLiveLayer(env, mockFetch)))),
+      Effect.runPromise(
+        importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, mockFetch))),
+      ),
       /disabled/,
     )
     .then(() => assert.equal(calls, 0));

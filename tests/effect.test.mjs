@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import { Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
 import { importIdEffect } from "../src/ynab.ts";
-import { ynabLiveLayer, importPlanEffect, findAccountsEffect } from "../src/ynab-service.ts";
+import { requestLiveLayer, importPlanEffect, findAccountsEffect } from "../src/ynab-service.ts";
 import { readSheetEffect, WorkbookError } from "../src/spreadsheet.ts";
 
 test("Cloudflare request handler is an Effect and retains unauthorized protection", async () => {
@@ -12,14 +12,14 @@ test("Cloudflare request handler is an Effect and retains unauthorized protectio
   );
   assert.equal(Effect.isEffect(program), true);
   const res = await Effect.runPromise(
-    program.pipe(Effect.provide(ynabLiveLayer({ UPLOAD_TOKEN: "secret" }))),
+    program.pipe(Effect.provide(requestLiveLayer({ UPLOAD_TOKEN: "secret" }))),
   );
   assert.equal(res.status, 401);
 });
 test("Effect YNAB program prevents writes while disabled", async () => {
   const plan = { counts: { rejected: 0 }, candidates: [] };
   const result = await Effect.runPromiseExit(
-    importPlanEffect(plan).pipe(Effect.provide(ynabLiveLayer({ YNAB_WRITE_ENABLED: "false" }))),
+    importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer({ YNAB_WRITE_ENABLED: "false" }))),
   );
   assert.equal(result._tag, "Failure");
 });
@@ -44,7 +44,7 @@ test("Effect decodes YNAB plans instead of trusting an untyped response", async 
     });
   await assert.rejects(
     Effect.runPromise(
-      findAccountsEffect.pipe(Effect.provide(ynabLiveLayer({ YNAB_TOKEN: "test" }, fetchFn))),
+      findAccountsEffect.pipe(Effect.provide(requestLiveLayer({ YNAB_TOKEN: "test" }, fetchFn))),
     ),
     /Cannot list YNAB plans/,
   );
@@ -80,7 +80,7 @@ test("Effect validates account schema and never posts to unexpected account data
     );
   };
   await assert.rejects(
-    Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(ynabLiveLayer(env, fetchFn)))),
+    Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, fetchFn)))),
     /Target must be/,
   );
   assert.equal(postCount, 0);
@@ -121,7 +121,7 @@ test("Effect refuses malformed successful YNAB POST responses without retrying w
     );
   };
   await assert.rejects(
-    Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(ynabLiveLayer(env, fetchFn)))),
+    Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, fetchFn)))),
     /Unexpected YNAB response/,
   );
   assert.equal(writes, 1);
@@ -162,7 +162,7 @@ test("Effect import response distinguishes matched IDs from actual imported move
     );
   };
   const result = await Effect.runPromise(
-    importPlanEffect(plan).pipe(Effect.provide(ynabLiveLayer(env, fetchFn))),
+    importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, fetchFn))),
   );
   assert.deepEqual(result, {
     submitted: 1,
@@ -215,7 +215,7 @@ test("a lost POST response is a typed uncertain import and is never retried", as
       ],
     }).pipe(
       Effect.provide(
-        ynabLiveLayer(
+        requestLiveLayer(
           {
             YNAB_TOKEN: "test",
             YNAB_PLAN_ID: "plan",

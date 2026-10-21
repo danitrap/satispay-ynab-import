@@ -3,12 +3,12 @@ import { strict as assert } from "node:assert";
 import { buildImportPlan, summarizeImportPlan } from "../src/import-plan.ts";
 import { Effect } from "effect";
 import { importIdEffect, buildYnabTransactionsEffect } from "../src/ynab.ts";
-import { importPlanEffect, findAccountsEffect, ynabLiveLayer } from "../src/ynab-service.ts";
+import { importPlanEffect, findAccountsEffect, requestLiveLayer } from "../src/ynab-service.ts";
 
 const runImport = (plan, env, mockFetch) =>
-  Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(ynabLiveLayer(env, mockFetch))));
+  Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, mockFetch))));
 const runAccountDiscovery = (env, mockFetch) =>
-  Effect.runPromise(findAccountsEffect.pipe(Effect.provide(ynabLiveLayer(env, mockFetch))));
+  Effect.runPromise(findAccountsEffect.pipe(Effect.provide(requestLiveLayer(env, mockFetch))));
 
 const headers = [
   "Data",

@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
-import { ynabLiveLayer } from "../src/ynab-service.ts";
+import { requestLiveLayer } from "../src/ynab-service.ts";
 import { processImportEffect } from "../src/import-handler.ts";
 
 const workbook = readFileSync(new URL("./fixtures/satispay.xlsx", import.meta.url));
@@ -22,7 +22,7 @@ const runRequest = (
     body: bytes,
   });
   return Effect.runPromise(
-    handleRequestEffect(request).pipe(Effect.provide(ynabLiveLayer(env, fetchFn))),
+    handleRequestEffect(request).pipe(Effect.provide(requestLiveLayer(env, fetchFn))),
   );
 };
 
@@ -46,7 +46,7 @@ test("prepare builds a real workbook plan without YNAB credentials or a write sw
   assert.equal(JSON.stringify(body).includes("Synthetic Shop"), false);
   const outcome = await Effect.runPromise(
     processImportEffect("prepare", new Uint8Array(workbook).buffer).pipe(
-      Effect.provide(ynabLiveLayer({ YNAB_IMPORT_FROM: "2026-10-01" })),
+      Effect.provide(requestLiveLayer({ YNAB_IMPORT_FROM: "2026-10-01" })),
     ),
   );
   assert.equal(outcome._tag, "ImportPrepared");

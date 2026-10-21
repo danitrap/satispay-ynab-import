@@ -21,13 +21,7 @@ export const requestLiveLayer = (env: AppEnv, fetchFn: typeof fetch = fetch) => 
   return ynabHttpLayer.pipe(Layer.provideMerge(config), Layer.provide(transport));
 };
 
-// Compatibility adapter for existing callers and tests.
-export const ynabLiveLayer = requestLiveLayer;
 export const ynabTestLayer = (service: YnabServiceApi) => Layer.succeed(YnabService, service);
 export const findAccountsEffect = Effect.flatMap(YnabService, (service) => service.findAccounts);
-export const validateAccountEffect = Effect.flatMap(
-  YnabService,
-  (service) => service.validateAccount,
-);
 export const importPlanEffect = (plan: ImportPlan) =>
   Effect.flatMap(YnabService, (service) => service.importPlan(plan));

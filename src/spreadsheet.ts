@@ -157,7 +157,3 @@ export const previewXlsxEffect = (file: ArrayBuffer) =>
       }),
     ),
   );
-
-// Promise adapters for clients outside the Effect runtime.
-export const inspectXlsx = (file: ArrayBuffer) => Effect.runPromise(inspectXlsxEffect(file));
-export const previewXlsx = (file: ArrayBuffer) => Effect.runPromise(previewXlsxEffect(file));

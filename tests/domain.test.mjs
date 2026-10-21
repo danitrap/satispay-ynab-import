@@ -11,7 +11,7 @@ import { buildImportPlan } from "../src/import-plan.ts";
 import { analyzeLedger } from "../src/ledger.ts";
 import { previewSatispay } from "../src/preview.ts";
 import { Effect } from "effect";
-import { importPlanEffect, ynabLiveLayer } from "../src/ynab-service.ts";
+import { importPlanEffect, requestLiveLayer } from "../src/ynab-service.ts";
 
 const headers = ["Data", "Nome", "Descrizione", "Importo", "Tipo", "Stato", "Disponibilità", "ID"];
 const row = (id, amount) => ["2026-10-18", "Shop", "", amount, "Altro", "✅ Approvato", amount, id];
@@ -55,7 +55,7 @@ test("account validation retains the specific rejection reason without leaking t
   const error = await Effect.runPromise(
     importPlanEffect({ counts: { rejected: 0 }, candidates: [] }).pipe(
       Effect.provide(
-        ynabLiveLayer(
+        requestLiveLayer(
           {
             YNAB_TOKEN: "fake",
             YNAB_PLAN_ID: "plan",
