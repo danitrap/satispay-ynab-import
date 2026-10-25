@@ -1,5 +1,6 @@
 import { observeOperation } from "./telemetry.ts";
 import { YnabAccountIdSchema, YnabPlanIdSchema } from "./domain-schema.ts";
+import { importIdentity } from "./application/ynab-transaction.ts";
 import type { SatispayTransactionId, YnabAccountId } from "./domain.ts";
 import type { YnabAccounts } from "./ynab-contract.ts";
 import { Effect, Redacted, Schema, Schedule } from "effect";
@@ -50,22 +51,8 @@ const MAX_DISCOVERED_PLANS = 20;
 
 /** Preserve the original SHA-256 namespace and 36-character import IDs exactly. */
 export function importIdEffect(satispayId: SatispayTransactionId) {
-  return Effect.tryPromise({
-    try: () =>
-      crypto.subtle.digest(
-        "SHA-256",
-        new TextEncoder().encode("satispay-transaction-id-v1:" + satispayId),
-      ),
-    catch: () => new YnabError("Could not create stable import ID."),
-  }).pipe(
-    Effect.map(
-      (hash) =>
-        "SPS:" +
-        [...new Uint8Array(hash)]
-          .map((n) => n.toString(16).padStart(2, "0"))
-          .join("")
-          .slice(0, 32),
-    ),
+  return importIdentity(satispayId).pipe(
+    Effect.mapError(() => new YnabError("Could not create stable import ID.")),
   );
 }
 

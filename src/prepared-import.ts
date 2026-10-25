@@ -6,6 +6,7 @@ import {
   type Milliunits,
   type SatispayTransactionId,
 } from "./domain.ts";
+import { reviewMemo } from "./application/ynab-transaction.ts";
 import type { AmbiguityReason, WalletBalanceCheck } from "./domain/movement-classification.ts";
 import { prepareImport, type PreparedImport } from "./domain/prepared-import.ts";
 import type { SatispayMovement } from "./domain/satispay-movement.ts";
@@ -96,23 +97,6 @@ const inputReason = (reason: SatispayExportHeaderReason): PreparedImportInputRea
 
 const clip = (value: string, fallback: string, maximum: number): string =>
   (value || fallback).slice(0, maximum);
-
-/** ADR 0001 review memo. The wording stays stable so transaction review instructions do not drift. */
-function reviewMemo(reason: AmbiguityReason, description: string): string {
-  const explanation = {
-    ambiguous_refund_purchase: "Multiple original purchases match this refund.",
-    refund_purchase_not_in_export: "The original purchase is absent from this export.",
-    refund_purchase_funding_mismatch:
-      "The original purchase has inconsistent wallet/benefit funding.",
-    invalid_refund_details: "The refund details cannot be verified.",
-    refund_exceeds_remaining_amount:
-      "The refund exceeds the remaining wallet amount of the original purchase.",
-    partial_refund_split_unknown:
-      "The cash and benefit split of this partial refund cannot be determined.",
-  }[reason];
-  const instruction = `[Satispay review] ${explanation} Using reported Disponibilità as the provisional wallet amount. Verify the cash/benefit split, correct the amount, then clear, approve and remove the orange flag.`;
-  return (instruction + (description ? "\n" + description : "")).slice(0, 500);
-}
 
 function candidateFrom(
   movement: SatispayMovement,
