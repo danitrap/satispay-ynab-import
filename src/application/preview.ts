@@ -1,32 +1,20 @@
-import { WorksheetInputError, type Milliunits } from "./domain.ts";
-import { PreparedImportInputError } from "./prepared-import.ts";
+import { PreparedImportInputError } from "./prepared-import-input.ts";
+import { SheetAnalysis, type PreviewSummary } from "./sheet-analysis.ts";
+import { readSheetEffect } from "./workbook-reader.ts";
+import type { Milliunits } from "../domain/primitives.ts";
 import {
   classifyMovements,
   type ClassifiedMovement,
   type MovementClassification,
-} from "./domain/movement-classification.ts";
-import { parseSatispayExport } from "./infrastructure/satispay-export-reader.ts";
+} from "../domain/movement-classification.ts";
+import { Effect } from "effect";
 
-/** A cell from a decoded Satispay export. Preview no longer classifies cells itself. */
-export type Cell = string | number | boolean | Date | null | undefined;
-
-export type PreviewRow = {
+type PreviewRow = {
   decision: "include" | "skip" | "review";
   reason: string;
   type: string;
   amountMilliunits?: Milliunits;
   provisional?: boolean;
-};
-
-const headerError = (reason: "EmptyExport" | "MissingColumns" | "MissingMovementIdentifier") => {
-  switch (reason) {
-    case "EmptyExport":
-      return new WorksheetInputError("EmptyWorksheet");
-    case "MissingColumns":
-      return new WorksheetInputError("MissingColumns");
-    case "MissingMovementIdentifier":
-      return new WorksheetInputError("MissingIdColumn");
-  }
 };
 
 function presentRow(classified: ClassifiedMovement): PreviewRow {
@@ -54,8 +42,11 @@ function presentRow(classified: ClassifiedMovement): PreviewRow {
   }
 }
 
-/** Whole-export preview. The domain classifies movements; this only shapes the dry-run summary. */
-function presentPreview(classification: MovementClassification) {
+/**
+ * Whole-export preview. The domain classifies movements; this shapes the dry-run summary.
+ * The HTTP presenter owns the response mode.
+ */
+export function previewSummary(classification: MovementClassification): PreviewSummary {
   if (classification.totals._tag === "Overflow")
     throw new PreparedImportInputError("AmountOverflow");
   const totals = classification.totals;
@@ -80,7 +71,6 @@ function presentPreview(classification: MovementClassification) {
   const inflowCents = totals.inflowMilliunits / 10;
   const outflowCents = totals.outflowMilliunits / 10;
   return {
-    mode: "preview-only" as const,
     rowCount: all.length,
     eligible: count("include"),
     skipped: count("skip"),
@@ -104,8 +94,12 @@ function presentPreview(classification: MovementClassification) {
 }
 
 /** Preview classifies the whole export and does not apply an import cutoff. */
-export function previewSatispay(rows: Cell[][]) {
-  const parsed = parseSatispayExport(rows);
-  if (parsed._tag === "HeaderError") throw headerError(parsed.reason);
-  return presentPreview(classifyMovements(parsed.satispayExport));
-}
+export const previewXlsxEffect = (file: ArrayBuffer) =>
+  readSheetEffect(file).pipe(
+    Effect.flatMap((rows) =>
+      Effect.gen(function* () {
+        const analysis = yield* SheetAnalysis;
+        return yield* analysis.preview(rows);
+      }),
+    ),
+  );

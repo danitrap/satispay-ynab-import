@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { calendarDate } from "../src/domain.ts";
+import { calendarDate } from "../src/domain/primitives.ts";
 import { classifyMovements } from "../src/domain/movement-classification.ts";
 import { prepareImport } from "../src/domain/prepared-import.ts";
 import { parseSatispayExport } from "../src/infrastructure/satispay-export-reader.ts";
-import { buildPreparedImport } from "../src/prepared-import.ts";
-import { previewSatispay } from "../src/preview.ts";
+import { buildPreparedImport } from "../src/infrastructure/build-prepared-import.ts";
+import { previewSatispay } from "../src/infrastructure/preview-rows.ts";
 
 const headers = [
   "Data",

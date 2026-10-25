@@ -1,5 +1,5 @@
 import { YnabGateway, type YnabGatewayFailure } from "./ynab-gateway.ts";
-import type { YnabAccountId, YnabPlanId } from "../domain.ts";
+import type { YnabAccountId, YnabPlanId } from "../domain/primitives.ts";
 import { Context, Effect } from "effect";
 
 /**

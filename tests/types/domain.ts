@@ -4,9 +4,9 @@ import {
   makeMilliunits,
   type Cents,
   type Milliunits,
-} from "../../src/domain.ts";
+} from "../../src/domain/primitives.ts";
 import { Schema } from "effect";
-import { YnabAccountIdSchema, YnabPlanIdSchema } from "../../src/domain-schema.ts";
+import { YnabAccountIdSchema, YnabPlanIdSchema } from "../../src/infrastructure/boundary-schema.ts";
 import { toYnabTransaction } from "../../src/application/ynab-transaction.ts";
 import type { ImportCandidate } from "../../src/domain/movement-classification.ts";
 

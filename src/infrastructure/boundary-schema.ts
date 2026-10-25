@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { calendarDate } from "./domain.ts";
+import { calendarDate } from "../domain/primitives.ts";
 
 export const CalendarDateSchema = Schema.String.check(
   Schema.makeFilter((value) => calendarDate(value) !== null),

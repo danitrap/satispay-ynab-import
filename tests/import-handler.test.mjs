@@ -2,9 +2,9 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { Effect } from "effect";
-import { handleRequestEffect } from "../src/index.ts";
+import { handleRequestEffect } from "../src/http/handle-request.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import { processImportEffect } from "../src/import-handler.ts";
+import { processImportEffect } from "../src/application/process-import.ts";
 
 const workbook = readFileSync(new URL("./fixtures/satispay.xlsx", import.meta.url));
 const runRequest = (
@@ -39,7 +39,7 @@ test("prepare builds a prepared import without YNAB credentials or a write switc
   const response = await runRequest("prepare", { YNAB_WRITE_ENABLED: "invalid" });
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.mode, "import-preview");
+  assert.equal(body.mode, "prepare-only");
   assert.equal(body.eligible, 1);
   assert.equal(body.outflowMilliunits, 5000);
   assert.equal(body.imported, 0);

@@ -245,12 +245,12 @@ A failed check returns HTTP **401** `{ "ok": false, "error": "Unauthorized" }`. 
 | --- | --- | --- | --- |
 | GET | `/health` | Health and supported capabilities | No |
 | GET | `/ynab/accounts` | Discover accessible Satispay-named YNAB accounts. Inspects at most 20 plans; `truncated` is true when later plans were not searched | No |
-| POST | `/inspect` | Inspect workbook or CSV columns and aggregate statistics | No |
+| POST | `/inspect` | Inspect workbook columns and aggregate statistics | No |
 | POST | `/preview` | Analyze all wallet movements; ignore the import cutoff | No |
 | POST | `/prepare` | Build a cutoff-aware prepared import | No |
 | POST | `/import` | Submit valid movements to YNAB | **Yes** |
 
-`/inspect` accepts `.xlsx` and CSV. The other upload endpoints accept `.xlsx` only. Upload a raw file body (recommended) or a multipart file in the field `file`.
+`/inspect`, `/preview`, `/prepare` and `/import` accept `.xlsx` only. `GET /health` reports `formats` as `["xlsx"]`. A CSV upload receives HTTP **415** `{ "ok": false, "error": "Preview/import supports XLSX only" }`. Upload a raw file body (recommended) or a multipart file in the field `file`.
 
 **Limits:** 4 MB per file, 4.5 MB per request, and at most **10,000 import candidates per import**, sent in sequential batches of **500**. Historical and excluded rows do not count toward the candidate limit, but still count toward the file size. Old binary `.xls` files are not supported.
 
@@ -258,7 +258,22 @@ A failed check returns HTTP **401** `{ "ok": false, "error": "Unauthorized" }`. 
 
 Configuration is validated only when an operation needs it. `/health` needs no credentials; `/inspect` and `/preview` need only `UPLOAD_TOKEN`; `/prepare` also needs a real calendar date in `YNAB_IMPORT_FROM`. Account discovery needs `YNAB_TOKEN`, and imports additionally need target plan/account IDs and an enabled write switch. An absent write switch defaults to disabled; its accepted values are exactly `"true"` and `"false"`.
 
-Authenticated configuration failures return HTTP **409**, disabled writes return **403**, and invalid workbooks, oversized candidate sets or unsuitable destination accounts return **422**. YNAB transport/response failures return **502**. Unusable individual rows are excluded and reported without blocking the remaining candidates. Import failures retain their existing `mode`, summary and `error` fields. If the POST outcome is uncertain, the error asks you to verify the import in YNAB before repeating it.
+Authenticated configuration failures return HTTP **409**, disabled writes return **403**, and invalid workbooks, oversized candidate sets or unsuitable destination accounts return **422**. YNAB transport/response failures return **502**. Unusable individual rows are excluded and reported without blocking the remaining candidates. If the POST outcome is uncertain, the error asks you to verify the import in YNAB before repeating it.
+
+### Response modes
+
+`mode` names the operation. Preview, prepare and import each start with that operation's name.
+
+| Endpoint | `mode` | Meaning |
+| --- | --- | --- |
+| `GET /health` | `ready` | The Worker is up |
+| `POST /inspect` | omitted | Workbook inspection. Nothing is sent to YNAB |
+| `POST /preview` | `preview-only` | Movement classification for the whole export. Nothing is sent to YNAB |
+| `POST /prepare` | `prepare-only` | Prepared import for the import cutoff. Nothing is sent to YNAB |
+| `POST /import` | `import-completed` | YNAB accepted every submitted batch |
+| `POST /import` | `import-failed` | The import stopped. The body keeps the prepared-import summary and `error`. Earlier batches may already be confirmed |
+
+Import failures keep that `mode`, the prepared-import summary and `error`.
 
 ### Reading the result
 
@@ -358,43 +373,61 @@ Balance discrepancies are **diagnostic** and do not block imports. An export-wid
 
 ## Architecture
 
-The code separates **pure financial calculations** from **effectful I/O**.
+The importer is four layers plus one composition root. [ADR 0003](docs/adr/0003-clean-architecture-with-effect.md) records the decision. Dependencies point inward: a domain module imports other domain modules, the application imports the domain and its own ports, and infrastructure and HTTP each import only the domain, the application, and their own layer. Branded primitives use Effect's `Brand` as a type; the domain does not run Effect. `npm run check:deps` enforces that rule for every module under `src/`. `src/main.ts` is the only file beside the four directories.
 
 ~~~text
 src/
-├── main.ts            Worker entry and the only composition root
-├── domain/            Domain layer for pure movement rules
-├── application/       Use cases and ports: prepare import, import, list YNAB accounts
-├── infrastructure/    Satispay export reader, YNAB gateway and Cloudflare bindings
-├── http/              Routes, authorization and bounded uploads
-├── index.ts           Re-exports the Worker entry for existing imports
-├── domain.ts          Pure constructors for dates, identifiers and exact money units
-├── domain-schema.ts   Schema validation for branded boundary values
-├── errors.ts          Workbook failures created at the decoder boundary
-├── telemetry.ts       Operation timing and bounded outcome counters
-├── auth.ts            Constant-time upload-token checks
-├── spreadsheet.ts     XLSX decoding and workbook inspection
-├── workbook-reader.ts Injectable external XLSX decoder
-├── csv.ts             CSV inspection
-├── preview.ts         Presents the shared classification without an import cutoff
-├── prepared-import.ts Builds a prepared import for /prepare and /import
-└── import-handler.ts  Prepare an import, then submit it when the route is /import
+├── main.ts                 Composition root: requestLiveLayer wires one implementation per port
+├── domain/                 Pure movement rules, money primitives, prepared import
+├── application/            Use cases and ports
+├── infrastructure/         Satispay export reader, YNAB gateway, Cloudflare bindings
+└── http/                   Authorization, uploads, controllers and presenters
 ~~~
+
+| Layer | What belongs here |
+| --- | --- |
+| Domain | Movement classification, merchant-refund matching, wallet amounts, the wallet balance check, and the prepared import. Pure functions and types. No Effect runtime, no exceptions, no I/O. |
+| Application | Use cases: preview, inspect, prepare import, import, and list YNAB accounts. Ports are Effect services. |
+| Infrastructure | The Satispay export reader (column names and status labels live only here), the workbook decoder, the YNAB gateway, and Cloudflare configuration and rate limiting. |
+| HTTP | Constant-time authorization, upload limits, controllers, and presenters. A controller parses the request, calls a use case, and hands the result to a presenter. Presenters own the JSON shape, the response mode, and the error-to-status mapping. |
+
+New code goes in the layer that owns the reason. A business rule goes in the domain. A use case or port goes in the application. An integration goes in infrastructure behind a port. A response field goes in a presenter. A new module belongs in one of those four layers, or it wires a port inside `src/main.ts`.
+
+Ports, and the infrastructure layer that implements each one:
+
+| Port | Implementation |
+| --- | --- |
+| `AppConfig` | Cloudflare bindings for the upload token, import cutoff, write gate, and YNAB target |
+| `AuthRateLimit` | Optional auth-failure limiter |
+| `WorkbookReader` | `read-excel-file` workbook decoder. Workbook failures are raised here |
+| `SatispayExportReader` | xlsx rows to Satispay movements, including header errors |
+| `SheetAnalysis` | Dry-run summary and workbook inspection over decoded rows. Column names stay in the export reader |
+| `YnabGateway` | List accounts, read one account, create one import batch |
+| `YnabPlanCatalog` | Plan list used while discovering Satispay-named accounts. Provided with the YNAB gateway |
+
+Two test seams keep the behavior stable:
+
+1. **Worker fetch handler.** `handleRequestEffect` with a fake YNAB fetch and the synthetic xlsx fixtures. This is the end-to-end safety net: the same movements, the same import identities, and the same HTTP status codes.
+2. **Import use case.** `importPrepared` against a fake YNAB gateway Layer. This covers the write gate, the limit of 10,000 import candidates, sequential batches of 500, target-account rules, the provisional-transaction representation, and import outcome counting, without HTTP.
+
+A golden test pins import identity (`SPS:` and SHA-256) for fixed synthetic movements. Changing that identity would create duplicate YNAB transactions.
+
+The code separates **pure financial calculations** from **effectful I/O**.
 
 The Worker uses [Effect v4](https://effect.website/) throughout its asynchronous boundaries:
 
 - **`Effect.gen`** composes file decoding, validation and remote API calls with typed errors.
-- **`Context.Service`** declares the YNAB gateway and the plan catalog used by import and account discovery.
+- **`Context.Service`** declares the ports: configuration, the auth-failure limiter, the workbook decoder, the Satispay export reader, sheet analysis, the YNAB gateway, and the plan catalog.
 - **`Config` + `Schema`** validate operation-specific settings from Cloudflare bindings; `Redacted` keeps decoded tokens out of ordinary diagnostic output. Configuration failures retain only the setting name and a safe message.
 - **`Layer`** provides the HTTP-backed YNAB gateway at the Worker request boundary. Tests replace that gateway with an in-memory service.
 - **Effect `HttpClient` + `FetchHttpClient`** run YNAB API requests using a fetch-compatible transport suitable for Cloudflare Workers.
 - **`HttpClientResponse.schemaBodyJson` + `Schema.decodeUnknownEffect`** validate the YNAB response envelope and operation-specific payloads instead of trusting untyped responses.
 - **`Effect.forEach`** produces stable SHA-256 import IDs with bounded concurrency.
-- **`Data.TaggedError` + `Effect.catchTags`** distinguish configuration, validation, transport and uncertain import failures. The import pipeline returns tagged application outcomes; the router owns HTTP status codes and JSON responses.
+- **`Data.TaggedError` + `Effect.catchTags`** distinguish configuration, validation, transport and uncertain import failures. The import pipeline returns tagged application outcomes. Controllers decode the upload, call the use case and hand that result to a presenter. Presenters own the JSON shape, the response mode and the error-to-status mapping.
 
-The domain modules stay independent of Effect. There is no global runtime holding Cloudflare request credentials; the live service Layer is provided per request.
+The domain does not run Effect. There is no global runtime holding Cloudflare request credentials; the live service Layer is provided per request.
 
-`requestLiveLayer` in `src/main.ts` is the single composition root for each request. It provides one configuration module, the optional auth-failure limiter, and the fetch transport, then builds the YNAB gateway. `/prepare` and `/import` share the prepare-import use case; only `/import` submits that prepared import. `/ynab/accounts` discovers plans, lists each plan's accounts, and keeps the ones whose names contain Satispay. Type-level tests verify that the gateway's three operations leave no configuration requirement for callers.
+`requestLiveLayer` in `src/main.ts` is the single composition root for each request. It provides configuration, the optional auth-failure limiter, the workbook decoder, the Satispay export reader, sheet analysis, the fetch transport, and the YNAB gateway. `/prepare` and `/import` share the prepare-import use case; only `/import` submits that prepared import. `/ynab/accounts` discovers plans, lists each plan's accounts, and keeps the ones whose names contain Satispay. Type-level tests verify that the gateway's three operations leave no configuration requirement for callers.
 
 Account discovery, target validation and imports declare separate failure types. Uncertain HTTP writes always carry a status, and an import reuses the target configuration it validated. Workbook analysis maps declared input errors to HTTP 422 while preserving unexpected exceptions as defects. The external XLSX decoder is injectable through `WorkbookReader`, whose Effect operations declare `WorkbookError` failures and preserve unexpected defects from injected implementations. The Promise-based library is adapted inside the live service.
 
@@ -414,7 +447,7 @@ Use `npm ci` to install the exact dependency versions recorded in `package-lock.
 npm ci
 npm test                # Test suite
 npm run check           # TypeScript type check
-npm run check:deps      # Domain and application dependency rule
+npm run check:deps      # Dependency rule for the whole source tree
 npm run check:bundle    # Wrangler dry-run bundle (no deployment)
 npm run dev             # Local Worker
 ~~~

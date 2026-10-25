@@ -1,5 +1,5 @@
 import type { SatispayExportRead } from "../domain/satispay-movement.ts";
-import type { WorkbookError } from "../errors.ts";
+import type { WorkbookError } from "./workbook-reader.ts";
 import { Context, Data, Effect } from "effect";
 
 export type SatispayExportHeaderReason =

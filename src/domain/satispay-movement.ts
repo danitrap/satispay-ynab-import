@@ -1,4 +1,4 @@
-import type { CalendarDate, Cents } from "../domain.ts";
+import type { CalendarDate, Cents } from "./primitives.ts";
 
 /**
  * A Satispay movement read from a Satispay export.

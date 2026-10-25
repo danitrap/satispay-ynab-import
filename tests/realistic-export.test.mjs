@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { readSheet } from "read-excel-file/universal";
 import { Effect } from "effect";
-import { handleRequestEffect } from "../src/index.ts";
+import { handleRequestEffect } from "../src/http/handle-request.ts";
 import { requestLiveLayer } from "../src/main.ts";
 import { createRealisticWorkbook } from "../scripts/generate-satispay-fixture.mjs";
 
@@ -140,7 +140,7 @@ test("prepare applies the cutoff and keeps historical purchases out of the impor
   const response = await run("prepare");
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.mode, "import-preview");
+  assert.equal(body.mode, "prepare-only");
   assert.equal(body.fromDate, CUTOFF);
   assert.equal(body.exported, 14);
   assert.equal(body.olderThanStart, 3);

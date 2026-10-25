@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { readSheet } from "read-excel-file/universal";
-import { buildPreparedImport } from "../src/prepared-import.ts";
+import { buildPreparedImport } from "../src/infrastructure/build-prepared-import.ts";
 
 const file = readFileSync(new URL("./fixtures/satispay-realistic.xlsx", import.meta.url));
 const bytes = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength);

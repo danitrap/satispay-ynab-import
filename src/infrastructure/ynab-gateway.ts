@@ -8,9 +8,9 @@ import {
   type YnabGatewayOperation,
   type YnabTransaction,
 } from "../application/ynab-gateway.ts";
-import type { YnabAccountId, YnabPlanId } from "../domain.ts";
-import { YnabAccountIdSchema, YnabPlanIdSchema } from "../domain-schema.ts";
-import { observeOperation } from "../telemetry.ts";
+import type { YnabAccountId, YnabPlanId } from "../domain/primitives.ts";
+import { YnabAccountIdSchema, YnabPlanIdSchema } from "./boundary-schema.ts";
+import { observeOperation } from "../application/telemetry.ts";
 import { Effect, Layer, Redacted, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 

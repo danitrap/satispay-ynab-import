@@ -1,5 +1,5 @@
 import type { ConfigurationError } from "./app-config.ts";
-import type { CalendarDate, Milliunits, YnabAccountId, YnabPlanId } from "../domain.ts";
+import type { CalendarDate, Milliunits, YnabAccountId, YnabPlanId } from "../domain/primitives.ts";
 import { Context, Data, type Effect } from "effect";
 
 /**

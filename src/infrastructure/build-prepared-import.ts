@@ -1,21 +1,25 @@
-import type { SatispayExportHeaderReason } from "./application/satispay-export-reader.ts";
+import {
+  PreparedImportInputError,
+  type PreparedImportInputReason,
+} from "../application/prepared-import-input.ts";
 import {
   summarizePreparedImport,
   type PreparedImportSummary,
-} from "./application/prepare-import.ts";
+} from "../application/prepare-import.ts";
+import type { SatispayExportHeaderReason } from "../application/satispay-export-reader.ts";
+import type { SheetCell } from "../application/workbook-reader.ts";
+import { reviewMemo } from "../application/ynab-transaction.ts";
+import type { AmbiguityReason, WalletBalanceCheck } from "../domain/movement-classification.ts";
+import { prepareImport, type PreparedImport } from "../domain/prepared-import.ts";
 import {
   calendarDate,
   satispayTransactionId,
   type CalendarDate,
   type Milliunits,
   type SatispayTransactionId,
-} from "./domain.ts";
-import { reviewMemo } from "./application/ynab-transaction.ts";
-import type { AmbiguityReason, WalletBalanceCheck } from "./domain/movement-classification.ts";
-import { prepareImport, type PreparedImport } from "./domain/prepared-import.ts";
-import type { SatispayMovement } from "./domain/satispay-movement.ts";
-import { parseSatispayExport } from "./infrastructure/satispay-export-reader.ts";
-import type { SheetCell } from "./spreadsheet.ts";
+} from "../domain/primitives.ts";
+import type { SatispayMovement } from "../domain/satispay-movement.ts";
+import { parseSatispayExport } from "./satispay-export-reader.ts";
 
 export type { PreparedImportSummary };
 
@@ -23,18 +27,6 @@ export type { PreparedImportSummary };
  * Turns one Satispay export into a prepared import and the YNAB candidates selected from it.
  * Eligibility comes only from movement classification. Column names stay in the export reader.
  */
-
-export type PreparedImportInputReason =
-  "InvalidCutoff" | "EmptyWorkbook" | "MissingColumns" | "MissingIdColumn" | "AmountOverflow";
-
-export class PreparedImportInputError extends Error {
-  readonly _tag = "PreparedImportInputError";
-  readonly reason: PreparedImportInputReason;
-  constructor(reason: PreparedImportInputReason) {
-    super(reason);
-    this.reason = reason;
-  }
-}
 
 /** Fields the current YNAB submission still needs from each selected movement. */
 export type YnabImportCandidate = {

@@ -3,7 +3,12 @@ import {
   SatispayExportReader,
   type SatispayExportHeaderReason,
 } from "../application/satispay-export-reader.ts";
-import { calendarDate, parseCents } from "../domain.ts";
+import {
+  WorkbookReader,
+  type SheetCell,
+  type WorkbookError,
+} from "../application/workbook-reader.ts";
+import { calendarDate, parseCents, parseLocalizedNumber } from "../domain/primitives.ts";
 import type {
   MovementAmount,
   SatispayApproval,
@@ -13,14 +18,13 @@ import type {
   SatispayMovementIdentifier,
   SatispayMovementKind,
 } from "../domain/satispay-movement.ts";
-import type { SheetCell } from "../spreadsheet.ts";
-import type { WorkbookError } from "../errors.ts";
-import { WorkbookReader } from "../workbook-reader.ts";
+import { WorksheetInputError } from "./worksheet-input.ts";
 import { Effect, Layer } from "effect";
 
 /**
  * Italian column names and status labels stay in this module.
- * Preview and prepared import both parse with `parseSatispayExport` and classify the movements.
+ * Preview and prepared import both parse with `parseSatispayExport`.
+ * Workbook inspection counts the same columns without classifying movements.
  */
 
 const COLUMN = {
@@ -162,6 +166,110 @@ export function parseSatispayExport(rows: readonly (readonly SheetCell[])[]): Pa
   return {
     _tag: "Export",
     satispayExport: { movements, includesWalletBalance: balanceAt >= 0 },
+  };
+}
+
+function present(v: SheetCell): boolean {
+  return v !== null && v !== undefined && String(v).trim() !== "";
+}
+function numberValue(v: SheetCell): number | null {
+  if (!present(v) || v instanceof Date || typeof v === "boolean") return null;
+  return parseLocalizedNumber(v);
+}
+function amountStats(values: SheetCell[]) {
+  const out = {
+    populated: 0,
+    positive: 0,
+    negative: 0,
+    zero: 0,
+    unparseable: 0,
+    numberCells: 0,
+    textCells: 0,
+  };
+  for (const v of values) {
+    if (!present(v)) continue;
+    out.populated++;
+    if (typeof v === "number") out.numberCells++;
+    if (typeof v === "string") out.textCells++;
+    const n = numberValue(v);
+    if (n === null) out.unparseable++;
+    else if (n > 0) out.positive++;
+    else if (n < 0) out.negative++;
+    else out.zero++;
+  }
+  return out;
+}
+function groupedCounts(values: SheetCell[]) {
+  const counts = new Map<string, number>();
+  for (const v of values) {
+    const label = present(v) ? String(v).trim() : "(vuoto)";
+    // Tipo and Stato should be controlled vocabularies. Cap output to avoid exposing free-form text.
+    const normalized = label.length > 80 ? "(valore lungo)" : label;
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+  }
+  const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  // An unexpected large cardinality likely means this is not a categorical field.
+  if (entries.length > 30)
+    return {
+      uniqueValues: entries.length,
+      counts: [],
+      warning: "Too many distinct values; categories hidden",
+    };
+  return {
+    uniqueValues: entries.length,
+    counts: entries.map(([value, count]) => ({ value, count })),
+  };
+}
+
+/** Inspection-only Satispay worksheet diagnostics. No transaction-level details leave the Worker. */
+export function summarizeSheet(rows: readonly (readonly SheetCell[])[]) {
+  const nonEmpty = rows.filter((row) => row.some(present));
+  if (!nonEmpty.length) throw new WorksheetInputError("EmptyWorksheet");
+  const [header, ...body] = nonEmpty;
+  if (header.length < 2) throw new WorksheetInputError("InsufficientColumns");
+  const columns = header.map((value, index) => String(value ?? `Column ${index + 1}`));
+  const position = (name: string) =>
+    columns.findIndex(
+      (col) => col.trim().toLocaleLowerCase("it-IT") === name.toLocaleLowerCase("it-IT"),
+    );
+  const field = (name: string): SheetCell[] => {
+    const i = position(name);
+    return i < 0 ? [] : body.map((row) => row[i]);
+  };
+  const idIndex = columns.findIndex((col) => col.trim() === "ID" || col.startsWith("ID ("));
+  const idValues = idIndex < 0 ? [] : body.map((row) => row[idIndex]);
+  const storedIds = idValues.filter(present);
+  const distinctIds = new Set(storedIds.map((v) => `${typeof v}:${String(v).trim()}`));
+  const dates = field("Data");
+  const fundingNames = ["Disponibilità", "Buoni Pasto", "FlexBen"];
+  const monetaryNames = ["Importo", ...fundingNames, "Disponibilità dopo la transazione"];
+  return {
+    columns,
+    rowCount: body.length,
+    sheet: 1,
+    analysis: {
+      types: position("Tipo") >= 0 ? groupedCounts(field("Tipo")) : null,
+      statuses: position("Stato") >= 0 ? groupedCounts(field("Stato")) : null,
+      identifiers: {
+        columnFound: idIndex >= 0,
+        present: storedIds.length,
+        missing: body.length - storedIds.length,
+        distinct: distinctIds.size,
+        duplicateRows: storedIds.length - distinctIds.size,
+        numericCells: storedIds.filter((v) => typeof v === "number").length,
+      },
+      dateCellTypes: {
+        date: dates.filter((v) => v instanceof Date).length,
+        number: dates.filter((v) => typeof v === "number").length,
+        text: dates.filter((v) => typeof v === "string").length,
+        empty: dates.filter((v) => !present(v)).length,
+      },
+      monetaryColumns: Object.fromEntries(
+        monetaryNames
+          .filter((name) => position(name) >= 0)
+          .map((name) => [name, amountStats(field(name))]),
+      ),
+    },
   };
 }
 

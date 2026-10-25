@@ -1,312 +1,65 @@
 import { AppConfig } from "../application/app-config.ts";
-import { reportedImportCounts, type ImportFailure } from "../application/import-prepared.ts";
-import { listYnabAccounts } from "../application/list-ynab-accounts.ts";
-import { authorizeEffect } from "../auth.ts";
-import { decodeCsv, parseCsv } from "../csv.ts";
-import { processImportEffect } from "../import-handler.ts";
-import { inspectXlsxEffect, previewXlsxEffect } from "../spreadsheet.ts";
-import { observeOperation } from "../telemetry.ts";
-import { Data, Effect, Stream } from "effect";
+import { authorizeEffect, type AuthorizationDecision } from "./auth.ts";
+import {
+  accountsController,
+  importController,
+  inspectController,
+  prepareController,
+  previewController,
+} from "./controllers.ts";
+import { presentAuthorization, presentHealth, presentNotFound } from "./presenters.ts";
+import { Effect } from "effect";
 
-const MAX_FILE_BYTES = 4_000_000;
-const MAX_REQUEST_BYTES = 4_500_000;
-const UPLOAD_PATHS = new Set(["/inspect", "/preview", "/prepare", "/import"]);
+type Route = "health" | "accounts" | "inspect" | "preview" | "prepare" | "import";
 
-class UploadError extends Data.TaggedError("UploadError")<{
-  readonly message: string;
-  readonly status: number;
-}> {
-  constructor(message: string, status = 400) {
-    super({ message, status });
-  }
-}
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff",
-    },
-  });
-
-const isImportRequest = (request: Request) =>
-  ["/prepare", "/import"].includes(new URL(request.url).pathname);
-
-function importFailureStatus(error: ImportFailure): number {
-  switch (error._tag) {
-    case "ConfigurationError":
-      return 409;
-    case "ImportWritesDisabledError":
-      return 403;
-    case "ImportTargetAccountError":
-    case "ImportCandidateLimitError":
-      return 422;
+const matchRoute = (request: Request): Route | undefined => {
+  const url = new URL(request.url);
+  if (request.method === "GET" && url.pathname === "/health") return "health";
+  if (request.method === "GET" && url.pathname === "/ynab/accounts") return "accounts";
+  if (request.method !== "POST") return undefined;
+  switch (url.pathname) {
+    case "/inspect":
+      return "inspect";
+    case "/preview":
+      return "preview";
+    case "/prepare":
+      return "prepare";
+    case "/import":
+      return "import";
     default:
-      return 502;
+      return undefined;
   }
-}
+};
 
-/** Bounded upload reads: also protect requests without Content-Length. */
-const readRequestBodyEffect = Effect.fn("satispay.upload")(
-  function* (request: Request) {
-    const body = request.body;
-    if (!body) return yield* Effect.fail(new UploadError("Missing request body"));
-    let total = 0;
-    const chunks = yield* Effect.acquireUseRelease(
-      Effect.succeed(body),
-      (stream) =>
-        Stream.fromReadableStream({
-          evaluate: () => stream,
-          releaseLockOnEnd: true,
-          onError: () => new UploadError("Cannot read request"),
-        }).pipe(
-          Stream.mapEffect((chunk) =>
-            Effect.suspend(() => {
-              total += chunk.byteLength;
-              return total > MAX_REQUEST_BYTES
-                ? Effect.fail(new UploadError("Upload too large", 413))
-                : Effect.succeed(chunk);
-            }),
-          ),
-          Stream.runCollect,
-        ),
-      (stream) => Effect.promise(() => stream.cancel().catch(() => undefined)),
-    );
-    const bytes = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return bytes;
-  },
-  Effect.timeoutOrElse({
-    duration: "30 seconds",
-    orElse: () => Effect.fail(new UploadError("Upload timed out", 408)),
-  }),
-  observeOperation("upload"),
-);
-
-const decodeMultipartEffect = (body: Uint8Array, contentType: string) =>
-  Effect.tryPromise({
-    try: async (signal) => {
-      const copy = new Request("https://local.invalid/inspect", {
-        method: "POST",
-        headers: { "Content-Type": contentType },
-        body: body.buffer as ArrayBuffer,
-        signal,
-      });
-      const form = await copy.formData();
-      const file = form.get("file");
-      if (!(file instanceof Blob))
-        throw new UploadError(
-          "Missing form field 'file'. Use Request Body → File → Shortcut Input instead.",
-        );
-      return {
-        bytes: new Uint8Array(await file.arrayBuffer()),
-        fileName: file instanceof File ? file.name : "shared-file",
-      };
-    },
-    catch: (e) =>
-      e instanceof UploadError
-        ? e
-        : new UploadError("Invalid multipart form. Use Request Body → File in Shortcuts."),
-  });
-
-/** Request adapter: there is a single Effect runtime boundary per incoming request. */
-export const handleRequestEffect = Effect.fnUntraced(
-  function* (request: Request) {
-    const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/health")
-      return json({
-        ok: true,
-        service: "satispay-ynab-import",
-        mode: "ready",
-        formats: ["xlsx", "csv"],
-        upload: ["raw", "multipart"],
-        routes: ["/inspect", "/preview", "/prepare", "/import", "/ynab/accounts"],
-      });
-    const listAccounts = request.method === "GET" && url.pathname === "/ynab/accounts";
-    const upload = request.method === "POST" && UPLOAD_PATHS.has(url.pathname);
-    if (!listAccounts && !upload) return json({ ok: false, error: "Not found" }, 404);
+/** A missing upload token is the same refusal as a wrong one. The presenter owns the status. */
+const authorizeRequest = (request: Request) =>
+  Effect.gen(function* () {
     const config = yield* AppConfig;
-    const uploadToken = yield* config.uploadToken.pipe(
+    return yield* config.uploadToken.pipe(
+      Effect.flatMap((token) => authorizeEffect(request, token)),
       Effect.catchTag("ConfigurationError", () =>
-        Effect.fail(new UploadError("Unauthorized", 401)),
+        Effect.succeed({ _tag: "Unauthorized" } as const satisfies AuthorizationDecision),
       ),
     );
-    const decision = yield* authorizeEffect(request, uploadToken);
-    if (decision._tag === "RateLimited") {
-      return json({ ok: false, error: "Too many failed authentication attempts" }, 429);
-    }
-    if (decision._tag === "Unauthorized") return json({ ok: false, error: "Unauthorized" }, 401);
-    if (listAccounts) {
-      const accounts = yield* listYnabAccounts;
-      return json({ ok: true, ...accounts });
-    }
-    if (url.pathname === "/import" && request.headers.get("X-Confirm-Import") !== "yes") {
-      return json(
-        {
-          ok: false,
-          error: "Set X-Confirm-Import: yes to enable this request; no writes performed",
-        },
-        403,
-      );
-    }
-    const preview = url.pathname === "/preview";
-    const importPath = url.pathname === "/import" || url.pathname === "/prepare";
-    const contentType = request.headers.get("Content-Type") ?? "application/octet-stream";
-    const contentLength = Number(request.headers.get("Content-Length") ?? "0");
-    if (contentLength > MAX_REQUEST_BYTES)
-      return json({ ok: false, error: "Upload too large" }, 413);
+  });
 
-    let bytes = yield* readRequestBodyEffect(request);
-    let fileName = "shared-file";
-    if (contentType.toLowerCase().startsWith("multipart/form-data")) {
-      const multipart = yield* decodeMultipartEffect(bytes, contentType);
-      bytes = multipart.bytes;
-      fileName = multipart.fileName;
-    } else if (/application\/(json|x-www-form-urlencoded)/i.test(contentType)) {
-      return json(
-        {
-          ok: false,
-          error: "Set Shortcuts Request Body → File → Shortcut Input, not JSON or Form.",
-        },
-        415,
-      );
-    }
-    if (bytes.length > MAX_FILE_BYTES) return json({ ok: false, error: "File exceeds 4 MB" }, 413);
-    if (bytes.length === 0) return json({ ok: false, error: "Empty file" }, 400);
-    const xlsMagic = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
-    if (fileName.toLowerCase().endsWith(".xls") || xlsMagic.every((v, i) => bytes[i] === v)) {
-      return json({ ok: false, error: "Legacy .xls not supported: export .xlsx" }, 415);
-    }
-    const xlsx =
-      bytes.length >= 4 &&
-      bytes[0] === 0x50 &&
-      bytes[1] === 0x4b &&
-      bytes[2] === 0x03 &&
-      bytes[3] === 0x04;
-    if (xlsx) {
-      if (importPath) {
-        const result = yield* processImportEffect(
-          url.pathname === "/import" ? "import" : "prepare",
-          bytes.buffer as ArrayBuffer,
-        );
-        if (result._tag === "ImportPrepared") {
-          return json({
-            ok: true,
-            mode: "import-preview",
-            ...result.summary,
-            imported: 0,
-            message: "No transactions have been sent to YNAB",
-          });
-        }
-        const counts = reportedImportCounts(result.outcome);
-        return json({
-          ok: true,
-          mode: "import-completed",
-          ...result.summary,
-          ...counts,
-          imported: counts.processed,
-          message:
-            "YNAB processed the batch (new or matched transactions). Review and reconcile Satispay in YNAB.",
-        });
-      }
-      if (preview) {
-        const data = yield* previewXlsxEffect(bytes.buffer as ArrayBuffer);
-        return json({
-          ok: true,
-          format: "xlsx",
-          fileName,
-          ...data,
-          imported: 0,
-          message: "Dry run only: nothing sent to YNAB.",
-        });
-      }
-      const data = yield* inspectXlsxEffect(bytes.buffer as ArrayBuffer);
-      return json({
-        ok: true,
-        format: "xlsx",
-        fileName,
-        ...data,
-        imported: 0,
-        message: "Excel received and parsed. Nothing sent to YNAB.",
-      });
-    }
-    if (
-      fileName.toLowerCase().endsWith(".xlsx") ||
-      contentType.toLowerCase().includes("spreadsheetml")
-    ) {
-      return json({ ok: false, error: "Not a valid XLSX (ZIP signature missing)" }, 422);
-    }
-    if (preview || importPath)
-      return json({ ok: false, error: "Preview/import supports XLSX only" }, 415);
-    const parsed = yield* Effect.try({
-      try: () => parseCsv(decodeCsv(bytes)),
-      catch: (e) => new UploadError(e instanceof Error ? e.message : "CSV parse error", 422),
-    });
-    return json({
-      ok: true,
-      mode: "inspect-only",
-      fileName,
-      delimiter: parsed.delimiter === "\t" ? "TAB" : parsed.delimiter,
-      columns: parsed.headers,
-      format: "csv",
-      rowCount: parsed.rows.length,
-      imported: 0,
-      message: "CSV received and parsed. Nothing sent to YNAB.",
-    });
-  },
-  (effect, request) =>
-    effect.pipe(
-      Effect.catchTags({
-        UploadError: (error) =>
-          Effect.succeed(json({ ok: false, error: error.message }, error.status)),
-        ConfigurationError: (error) =>
-          Effect.succeed(
-            json(
-              {
-                ok: false,
-                error: error.message,
-                ...(isImportRequest(request) ? { imported: 0 } : {}),
-              },
-              409,
-            ),
-          ),
-        WorkbookError: (error) =>
-          Effect.succeed(
-            json(
-              {
-                ok: false,
-                error: error.message,
-                ...(isImportRequest(request) ? { imported: 0 } : {}),
-              },
-              422,
-            ),
-          ),
-        PreparedImportError: (error) =>
-          Effect.succeed(json({ ok: false, error: error.message, imported: 0 }, 422)),
-        ImportFailedError: (error) => {
-          const progress =
-            error.reason._tag === "ImportBatchError" || error.reason._tag === "ImportIdentityError"
-              ? reportedImportCounts(error.reason.outcome)
-              : undefined;
-          return Effect.succeed(
-            json(
-              {
-                ok: false,
-                mode: "import-failed",
-                ...error.summary,
-                ...(progress ? { ...progress, imported: progress.processed } : { imported: 0 }),
-                error: error.message,
-              },
-              importFailureStatus(error.reason),
-            ),
-          );
-        },
-        YnabGatewayError: (error) => Effect.succeed(json({ ok: false, error: error.message }, 502)),
-      }),
-    ),
-);
+/** Match a route and authorize it. Controllers call presenters for the response. */
+export const handleRequestEffect = Effect.fnUntraced(function* (request: Request) {
+  const route = matchRoute(request);
+  if (route === undefined) return presentNotFound();
+  if (route === "health") return presentHealth();
+  const decision = yield* authorizeRequest(request);
+  if (decision._tag !== "Authorized") return presentAuthorization(decision);
+  switch (route) {
+    case "accounts":
+      return yield* accountsController();
+    case "inspect":
+      return yield* inspectController(request);
+    case "preview":
+      return yield* previewController(request);
+    case "prepare":
+      return yield* prepareController(request);
+    case "import":
+      return yield* importController(request);
+  }
+});
