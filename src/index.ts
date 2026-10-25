@@ -1,13 +1,14 @@
 import { observeOperation } from "./telemetry.ts";
-import { Data, Effect, Redacted, Stream } from "effect";
-import { AppConfig, type AppEnv } from "./config.ts";
+import { Data, Effect, Stream } from "effect";
+import { authorizeEffect, type WorkerEnv } from "./auth.ts";
+import { AppConfig } from "./config.ts";
 import { decodeCsv, parseCsv } from "./csv.ts";
 import { inspectXlsxEffect, previewXlsxEffect } from "./spreadsheet.ts";
 import { processImportEffect } from "./import-handler.ts";
 import type { YnabFailure } from "./errors.ts";
 import { findAccountsEffect, requestLiveLayer } from "./ynab-service.ts";
 
-type Env = AppEnv;
+type Env = WorkerEnv;
 const MAX_FILE_BYTES = 4_000_000;
 const MAX_REQUEST_BYTES = 4_500_000;
 const UPLOAD_PATHS = new Set(["/inspect", "/preview", "/prepare", "/import"]);
@@ -138,9 +139,11 @@ export const handleRequestEffect = Effect.fnUntraced(
         Effect.fail(new UploadError("Unauthorized", 401)),
       ),
     );
-    if (request.headers.get("Authorization") !== "Bearer " + Redacted.value(uploadToken)) {
-      return json({ ok: false, error: "Unauthorized" }, 401);
+    const decision = yield* authorizeEffect(request, uploadToken);
+    if (decision._tag === "RateLimited") {
+      return json({ ok: false, error: "Too many failed authentication attempts" }, 429);
     }
+    if (decision._tag === "Unauthorized") return json({ ok: false, error: "Unauthorized" }, 401);
     if (listAccounts) {
       const accounts = yield* findAccountsEffect;
       return json({ ok: true, ...accounts });

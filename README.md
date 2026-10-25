@@ -112,6 +112,7 @@ The date is only an example: set `YNAB_IMPORT_FROM` to the **first date you inte
 | `YNAB_IMPORT_FROM` | **`[vars]`** — inclusive `YYYY-MM-DD` import cutoff |
 | `YNAB_WRITE_ENABLED` | **`[vars]`** — explicit write switch; start with `false` |
 | `UPLOAD_TOKEN` | **Secret** — authorizes access to the Worker |
+| `AUTH_FAILURE_LIMITER` | **Binding** — rate-limits failed upload-token attempts; optional at runtime |
 | `YNAB_TOKEN` | **Secret** — YNAB personal access token |
 
 For local testing, copy the secrets template and fill in your own values:
@@ -131,6 +132,8 @@ npx wrangler secret put YNAB_ACCOUNT_ID
 ~~~
 
 `UPLOAD_TOKEN` should be an independently generated, long random string, **not** your YNAB token.
+
+`wrangler.toml` binds `AUTH_FAILURE_LIMITER`, a [Workers Rate Limiting](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/) binding. Each failed check consumes one unit for that client address (`CF-Connecting-IP`) in the Cloudflare location that handled the request: **10 failures per 60 seconds**, then HTTP 429. Only failed attempts consume the budget. `namespace_id` is an account-wide counter id, so production uses `1001` and Preview uses `1002`; change either id if your account already uses it. Wrangler leaves `ratelimits` out of Previews, so the Preview binding is declared separately. The Node test suite, and any runtime where the binding is absent, still requires the token and leaves failures unthrottled.
 
 ### 3. Find your YNAB account IDs
 
@@ -235,6 +238,8 @@ The Shortcut keeps its HTTP request open during the import. There is no backgrou
 ## API reference
 
 All responses are JSON. Every endpoint except `GET /health` requires `Authorization: Bearer <UPLOAD_TOKEN>`.
+
+A failed check returns HTTP **401** `{ "ok": false, "error": "Unauthorized" }`. The comparison is constant-time, including when the header is missing or a different length from the token. After the `AUTH_FAILURE_LIMITER` budget is exhausted, that same failure returns HTTP **429** `{ "ok": false, "error": "Too many failed authentication attempts" }`. `GET /health` stays uncounted. This 429 comes from the upload check. YNAB transport failures still return HTTP 502.
 
 | Method | Route | Description | YNAB write? |
 | --- | --- | --- | --- |
@@ -357,6 +362,7 @@ src/
 ├── errors.ts          Tagged application failures and import diagnostics
 ├── failure-message.ts Safe presentation of structured failure reasons
 ├── telemetry.ts       Operation timing and bounded outcome counters
+├── auth.ts            Constant-time upload-token checks and auth-failure limits
 ├── index.ts           Worker routes, authorization, bounded uploads
 ├── spreadsheet.ts     XLSX decoding and workbook inspection
 ├── workbook-reader.ts Injectable external XLSX decoder
@@ -383,7 +389,7 @@ The Worker uses [Effect v4](https://effect.website/) throughout its asynchronous
 
 The domain modules stay independent of Effect. There is no global runtime holding Cloudflare request credentials; the live service Layer is provided per request.
 
-`requestLiveLayer` is the single composition root for each request. It provides one configuration module and the fetch transport, then builds the YNAB implementation, which closes over those dependencies. The router and import programs consume their declared requirements; `YnabServiceApi` describes public results and failures independently of the implementation. Type-level tests verify that public operations leave no infrastructure requirements for callers.
+`requestLiveLayer` is the single composition root for each request. It provides one configuration module, the optional auth-failure limiter, and the fetch transport, then builds the YNAB implementation, which closes over those dependencies. The router and import programs consume their declared requirements; `YnabServiceApi` describes public results and failures independently of the implementation. Type-level tests verify that public operations leave no infrastructure requirements for callers.
 
 Account discovery, target validation and imports declare separate failure types. Uncertain HTTP writes always carry a status, and an import reuses the target configuration it validated. Workbook analysis maps declared input errors to HTTP 422 while preserving unexpected exceptions as defects. The external XLSX decoder is injectable through `WorkbookReader`, whose Effect operations declare `WorkbookError` failures and preserve unexpected defects from injected implementations. The Promise-based library is adapted inside the live service.
 
@@ -425,14 +431,14 @@ The sources are placed in `vendor/effect/`, pinned to `effect@4.0.5` to match th
 
 ### Cloudflare Preview environments
 
-The example Wrangler configuration includes a separate `[previews.vars]` block, with YNAB writes **disabled** and placeholder account IDs. These are deliberately fake Preview values, not production IDs. Cloudflare's `wrangler preview` expects its preview configuration to be explicit.
+The example Wrangler configuration includes a separate `[previews.vars]` block, with YNAB writes **disabled** and placeholder account IDs, and a separate `AUTH_FAILURE_LIMITER` binding (`namespace_id` `1002`). These placeholder IDs are fake Preview values. Cloudflare's `wrangler preview` expects its preview configuration to be explicit.
 
 Test `GET /health` without credentials. For authenticated endpoints, configure a **separate preview-only `UPLOAD_TOKEN`**. Do not copy production YNAB credentials into an untrusted Preview environment.
 
 ## Security and limitations
 
 - Satispay exports are uploaded **on demand**. This project does not log into, scrape, or continuously synchronize a Satispay account.
-- Authentication is required on all non-health endpoints. Keep both tokens secret, rotate them if exposed, and never commit a real export.
+- Authentication is required on all non-health endpoints. The upload token is compared in constant time, and failed attempts are rate-limited per client address when `AUTH_FAILURE_LIMITER` is configured. Keep both tokens secret, rotate them if exposed, and never commit a real export.
 - The account must be active, on-budget and contain "Satispay" in its name.
 - Sensitive transaction details are not included in aggregate API responses.
 - Exports are parsed in memory, with strict request-size limits.

@@ -13,6 +13,17 @@ head_sampling_rate = 1
 YNAB_WRITE_ENABLED = "true"
 YNAB_IMPORT_FROM = "2026-10-11"
 
+# Failed authentication attempts per client address, in each Cloudflare location.
+# namespace_id is an account-wide counter id. period must be 10 or 60.
+# Change the id if this account already uses 1001.
+[[ratelimits]]
+name = "AUTH_FAILURE_LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
 # Configure these four as Cloudflare Worker Secrets, never in Git:
 # UPLOAD_TOKEN, YNAB_TOKEN, YNAB_PLAN_ID, YNAB_ACCOUNT_ID
 # Wrangler preserves existing Worker Secrets during normal deployments.
@@ -26,3 +37,12 @@ YNAB_WRITE_ENABLED = "false"
 YNAB_PLAN_ID = "00000000-0000-0000-0000-000000000000"
 YNAB_ACCOUNT_ID = "00000000-0000-0000-0000-000000000000"
 YNAB_IMPORT_FROM = "2026-10-11"
+
+# ratelimits are not inherited by Previews. Keep this id distinct from production.
+[[previews.ratelimits]]
+name = "AUTH_FAILURE_LIMITER"
+namespace_id = "1002"
+
+  [previews.ratelimits.simple]
+  limit = 10
+  period = 60
