@@ -57,7 +57,6 @@ const uploadStatus = (reason: UploadReason): number => {
     case "XlsxOnly":
       return 415;
     case "InvalidXlsx":
-    case "CsvParse":
       return 422;
   }
 };
@@ -85,7 +84,7 @@ export const presentHealth = () =>
     ok: true,
     service: "satispay-ynab-import",
     mode: "ready",
-    formats: ["xlsx", "csv"],
+    formats: ["xlsx"],
     upload: ["raw", "multipart"],
     routes: ["/inspect", "/preview", "/prepare", "/import", "/ynab/accounts"],
   });
@@ -118,26 +117,6 @@ export const presentInspectXlsx = <Summary extends object>(summary: Summary, fil
     ...summary,
     imported: 0,
     message: "Excel received and parsed. Nothing sent to YNAB.",
-  });
-
-export const presentInspectCsv = (
-  parsed: {
-    readonly delimiter: string;
-    readonly headers: readonly string[];
-    readonly rows: readonly unknown[];
-  },
-  fileName: string,
-) =>
-  json({
-    ok: true,
-    mode: "inspect-only",
-    fileName,
-    delimiter: parsed.delimiter === "\t" ? "TAB" : parsed.delimiter,
-    columns: parsed.headers,
-    format: "csv",
-    rowCount: parsed.rows.length,
-    imported: 0,
-    message: "CSV received and parsed. Nothing sent to YNAB.",
   });
 
 export const presentPreview = <Summary extends object>(summary: Summary, fileName: string) =>

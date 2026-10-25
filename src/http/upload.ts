@@ -17,8 +17,7 @@ export type UploadReason =
   | "EmptyFile"
   | "LegacyXls"
   | "InvalidXlsx"
-  | "XlsxOnly"
-  | "CsvParse";
+  | "XlsxOnly";
 
 const UPLOAD_MESSAGES: Record<UploadReason, string> = {
   MissingBody: "Missing request body",
@@ -33,7 +32,6 @@ const UPLOAD_MESSAGES: Record<UploadReason, string> = {
   LegacyXls: "Legacy .xls not supported: export .xlsx",
   InvalidXlsx: "Not a valid XLSX (ZIP signature missing)",
   XlsxOnly: "Preview/import supports XLSX only",
-  CsvParse: "CSV parse error",
 };
 
 /** The upload could not be decoded. The presenter chooses the HTTP status. */

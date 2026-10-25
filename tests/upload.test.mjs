@@ -14,14 +14,43 @@ function raw(body, contentType = "application/octet-stream") {
     env,
   );
 }
-test("accepts raw CSV from Shortcut File body", async () => {
-  const response = await raw("Data;Descrizione;Importo\n2026-10-18;Caffe;-3,50\n");
-  const data = await response.json();
-  assert.equal(response.status, 200);
-  assert.equal(data.rowCount, 1);
-  assert.equal(data.imported, 0);
-  assert.equal(data.format, "csv");
-  assert.equal(JSON.stringify(data).includes("Caffe"), false);
+test("a CSV upload receives the unsupported-format response", async () => {
+  const csv = "Data;Descrizione;Importo\n2026-10-18;Caffe;-3,50\n";
+  const expected = { ok: false, error: "Preview/import supports XLSX only" };
+  const routes = [
+    ["/inspect", {}],
+    ["/preview", {}],
+    ["/prepare", {}],
+    ["/import", { "X-Confirm-Import": "yes" }],
+  ];
+  for (const [path, extraHeaders] of routes) {
+    const response = await worker.fetch(
+      new Request(`https://local.invalid${path}`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test-secret",
+          "Content-Type": "text/csv",
+          ...extraHeaders,
+        },
+        body: csv,
+      }),
+      env,
+    );
+    assert.equal(response.status, 415, path);
+    assert.deepEqual(await response.json(), expected, path);
+  }
+  const form = new FormData();
+  form.set("file", new File([csv], "export.csv", { type: "text/csv" }));
+  const multipart = await worker.fetch(
+    new Request(endpoint, {
+      method: "POST",
+      headers: { Authorization: "Bearer test-secret" },
+      body: form,
+    }),
+    env,
+  );
+  assert.equal(multipart.status, 415);
+  assert.deepEqual(await multipart.json(), expected);
 });
 test("gives actionable error for JSON uploads", async () => {
   const response = await raw("{}", "application/json");
@@ -48,5 +77,5 @@ test("summarizes Excel without exposing records", () => {
 test("health reports supported formats", async () => {
   const response = await worker.fetch(new Request("https://local.invalid/health"), env);
   const body = await response.json();
-  assert.deepEqual(body.formats, ["xlsx", "csv"]);
+  assert.deepEqual(body.formats, ["xlsx"]);
 });
