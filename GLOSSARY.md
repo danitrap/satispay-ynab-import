@@ -6,6 +6,10 @@ This context represents movements in a Satispay cash wallet within a YNAB plan. 
 
 ### Movements and funding
 
+**Satispay export**:
+The spreadsheet of Satispay movements that the user downloads from Satispay and hands to the importer. Its column names and status labels belong to Satispay.
+_Avoid_: Sheet, workbook, upload, when the content rather than the file format matters.
+
 **Satispay movement**:
 A financial event recorded by Satispay, such as a purchase, refund, wallet top-up or payment to another person. A movement can affect the cash wallet, benefit balances, or both.
 _Avoid_: Transaction, when the distinction from a YNAB transaction matters.
@@ -51,6 +55,7 @@ _Avoid_: Wallet balance, nominal amount, provisional wallet amount.
 
 **YNAB plan**:
 The user's financial plan in YNAB containing the destination wallet account and spending categories.
+_Avoid_: Plan, for anything produced by the importer.
 
 **YNAB wallet account**:
 The account within a YNAB plan that represents the Satispay cash wallet.
@@ -74,6 +79,18 @@ _Avoid_: Rejected movement.
 **Rejected movement**:
 A Satispay movement excluded from a particular import because its essential data is unusable or its Satispay status is not approved. Missing or repeated source identifiers, invalid dates and unreadable amounts are examples.
 _Avoid_: Unimportable transaction, skipped movement, ambiguous transaction.
+
+**Movement classification**:
+The decision, for each Satispay movement in a Satispay export, of whether it is an import candidate, a provisional transaction, a skipped movement or a rejected movement. A provisional transaction can be an import candidate; preview and prepared import share this classification, and only the prepared import applies the import cutoff.
+_Avoid_: Eligibility, decision, when they disagree with this classification.
+
+**Prepared import**:
+The import candidates, skipped movements and rejected movements selected from one Satispay export for one import cutoff.
+_Avoid_: Import plan, plan.
+
+**Import outcome**:
+The result of submitting a prepared import to YNAB, counting confirmed, duplicate, failed, uncertain and unattempted candidates.
+_Avoid_: Processed, imported, when they do not mean confirmed.
 
 **Import batch**:
 A group of import candidates submitted together to YNAB as part of an import.
