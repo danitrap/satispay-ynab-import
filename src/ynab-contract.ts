@@ -18,6 +18,8 @@ export type YnabAccounts = {
     readonly accountName: string;
     readonly onBudget: boolean;
   }>;
+  /** True when YNAB returned more plans than this discovery pass inspects. */
+  readonly truncated: boolean;
 };
 export type YnabImportResult = {
   readonly submitted: number;

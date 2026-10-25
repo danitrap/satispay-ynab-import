@@ -141,7 +141,7 @@ curl -H "Authorization: Bearer <your-upload-token>" \
   "http://localhost:8787/ynab/accounts"
 ~~~
 
-The endpoint returns accessible, active YNAB accounts containing "Satispay" in their name, including their plan and account IDs. Use those IDs to set the `YNAB_PLAN_ID` and `YNAB_ACCOUNT_ID` Secrets on the deployed Worker (and in your ignored local `.dev.vars`); do **not** add the IDs to `wrangler.toml`.
+The endpoint returns accessible, active YNAB accounts containing "Satispay" in their name, including their plan and account IDs. YNAB's `GET /plans` response is not paginated; discovery requests accounts for at most 20 of those plans and sets `truncated` to `true` when more plans exist. Use those IDs to set the `YNAB_PLAN_ID` and `YNAB_ACCOUNT_ID` Secrets on the deployed Worker (and in your ignored local `.dev.vars`); do **not** add the IDs to `wrangler.toml`.
 
 To deploy:
 
@@ -239,7 +239,7 @@ All responses are JSON. Every endpoint except `GET /health` requires `Authorizat
 | Method | Route | Description | YNAB write? |
 | --- | --- | --- | --- |
 | GET | `/health` | Health and supported capabilities | No |
-| GET | `/ynab/accounts` | Discover accessible Satispay-named YNAB accounts | No |
+| GET | `/ynab/accounts` | Discover accessible Satispay-named YNAB accounts. Inspects at most 20 plans; `truncated` is true when later plans were not searched | No |
 | POST | `/inspect` | Inspect workbook or CSV columns and aggregate statistics | No |
 | POST | `/preview` | Analyze all wallet movements; ignore the import cutoff | No |
 | POST | `/prepare` | Build a cutoff-aware import plan | No |

@@ -22,6 +22,7 @@ const stub = {
         onBudget: true,
       },
     ],
+    truncated: false,
   }),
   validateAccount: Effect.succeed({
     id: "wallet",

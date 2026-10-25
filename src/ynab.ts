@@ -44,6 +44,10 @@ const ImportResultSchema = Schema.Struct({
   duplicate_import_ids: Schema.Array(Schema.String),
 });
 
+// GET /plans returns the full list and has no page parameter. Account lookups
+// stay capped so discovery cannot fan out without bound.
+const MAX_DISCOVERED_PLANS = 20;
+
 /** Preserve the original SHA-256 namespace and 36-character import IDs exactly. */
 export function importIdEffect(satispayId: SatispayTransactionId) {
   return Effect.tryPromise({
@@ -168,8 +172,9 @@ export const makeYnabClient = Effect.gen(function* () {
     const { plans } = yield* Schema.decodeUnknownEffect(PlansSchema)(rawPlans).pipe(
       Effect.mapError(() => new YnabResponseError({ reason: "Plans" })),
     );
+    const discoveredPlans = plans.slice(0, MAX_DISCOVERED_PLANS);
     const matches: Array<YnabAccounts["matches"][number]> = [];
-    for (const plan of plans.slice(0, 20)) {
+    for (const plan of discoveredPlans) {
       const rawAccounts = yield* readApiEffect(
         "/plans/" + encodeURIComponent(plan.id) + "/accounts",
         token,
@@ -193,7 +198,7 @@ export const makeYnabClient = Effect.gen(function* () {
         }
       }
     }
-    return { matches };
+    return { matches, truncated: plans.length > discoveredPlans.length };
   });
 
   const validateTargetAccountEffect = Effect.fn("satispay.ynab.validateAccount")(function* (
