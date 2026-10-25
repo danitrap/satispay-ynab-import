@@ -2,7 +2,6 @@ import {
   parseCents,
   makeCents,
   makeMilliunits,
-  negateCents,
   WorksheetInputError,
   type Cents,
 } from "./domain.ts";
@@ -12,7 +11,9 @@ export type RefundReviewReason =
   | "ambiguous_refund_purchase"
   | "refund_purchase_not_in_export"
   | "refund_purchase_funding_mismatch"
-  | "invalid_refund_details";
+  | "invalid_refund_details"
+  | "refund_exceeds_remaining_amount"
+  | "partial_refund_split_unknown";
 type RefundResolution = {
   amountCents: Cents | null;
   issue?: string;
@@ -42,6 +43,76 @@ function merchantName(value: SheetCell): string {
   const name = text(value).toLocaleLowerCase("it-IT").replace(/\s+/g, " ");
   return name === "-" ? "" : name;
 }
+type IndexedPurchase = {
+  time: number;
+  nominal: number;
+  remainingNominal: number;
+  remainingWallet: number | null;
+  walletOnly: boolean;
+  benefitOnly: boolean;
+};
+type RefundFit =
+  | { kind: "restore"; purchase: IndexedPurchase; wallet: number }
+  | { kind: "inconsistent" }
+  | { kind: "unsplit" };
+function purchaseFunding(
+  row: SheetCell[],
+  signed: number,
+  availabilityAt: number,
+  benefitAt: number[],
+): { wallet: number | null; walletOnly: boolean; benefitOnly: boolean } {
+  const originalAmount = cents(row[availabilityAt]);
+  const walletSpent = originalAmount === null && !text(row[availabilityAt]) ? 0 : originalAmount;
+  const benefitSum = benefitAt.reduce<number | null>((sum, at) => {
+    if (sum === null) return null;
+    const raw = row[at];
+    const value = !text(raw) ? 0 : cents(raw);
+    return value === null ? null : makeCents(sum + value);
+  }, 0);
+  // The purchase funding split is evidence only when it accounts for the whole nominal amount.
+  if (
+    walletSpent === null ||
+    walletSpent > 0 ||
+    benefitSum === null ||
+    walletSpent + benefitSum !== signed
+  ) {
+    return { wallet: null, walletOnly: false, benefitOnly: false };
+  }
+  const magnitude = -signed;
+  // Unary minus of a zero wallet outflow is -0, which must stay a plain zero wallet amount.
+  const wallet = Math.abs(walletSpent);
+  const benefit = Math.abs(benefitSum);
+  return {
+    wallet,
+    walletOnly: benefit === 0 && wallet === magnitude,
+    benefitOnly: wallet === 0 && benefit === magnitude,
+  };
+}
+function refundFit(purchase: IndexedPurchase, refundNominal: number): RefundFit | null {
+  if (purchase.remainingNominal <= 0 || refundNominal > purchase.remainingNominal) return null;
+  if (purchase.remainingWallet === null) {
+    return refundNominal === purchase.nominal ? { kind: "inconsistent" } : null;
+  }
+  // Closing the remaining nominal restores whatever wallet amount is left, including a mixed purchase.
+  if (refundNominal === purchase.remainingNominal) {
+    return { kind: "restore", purchase, wallet: purchase.remainingWallet };
+  }
+  if (purchase.walletOnly) return { kind: "restore", purchase, wallet: refundNominal };
+  if (purchase.benefitOnly) return { kind: "restore", purchase, wallet: 0 };
+  return { kind: "unsplit" };
+}
+function unmatchedReason(
+  bucket: IndexedPurchase[],
+  first: number,
+  last: number,
+  refundNominal: number,
+): RefundReviewReason {
+  if (first === last) return "refund_purchase_not_in_export";
+  for (let cursor = first; cursor < last; cursor++) {
+    if (refundNominal <= bucket[cursor].remainingNominal) return "refund_purchase_funding_mismatch";
+  }
+  return "refund_exceeds_remaining_amount";
+}
 export function analyzeLedger(rows: SheetCell[][]): {
   resolved: RefundResolution[];
   refundsAdjusted: number;
@@ -67,19 +138,31 @@ export function analyzeLedger(rows: SheetCell[][]): {
   let refundsAdjusted = 0,
     refundsUnresolved = 0;
   const maxDistance = 90 * 24 * 60 * 60 * 1000;
-  // Index purchases once: large exports must not rescan every row for every refund.
-  const purchases = new Map<string, { index: number; time: number }[]>();
-  for (const [index, row] of records.entries()) {
+  const benefitAt = ["Buoni Pasto", "FlexBen"].flatMap((name) => {
+    const at = idx(name);
+    return at < 0 ? [] : [at];
+  });
+  // Index purchases once: the date window is binary-searched, and ambiguity stops the scan at two fits.
+  const purchases = new Map<string, IndexedPurchase[]>();
+  for (const row of records) {
     if (text(row[idx("Tipo")]) !== "🏬 a un Negozio" || text(row[idx("Stato")]) !== "✅ Approvato")
       continue;
     const name = merchantName(row[idx("Nome")]);
-    const nominal = cents(row[idx("Importo")]);
+    const signed = cents(row[idx("Importo")]);
     const date = time(row[idx("Data")]);
-    if (!name || nominal === null || date === null) continue;
-    const key = JSON.stringify([name, nominal]);
-    const bucket = purchases.get(key) ?? [];
-    bucket.push({ index, time: date });
-    purchases.set(key, bucket);
+    if (!name || signed === null || signed >= 0 || date === null) continue;
+    const funding = purchaseFunding(row, signed, idx("Disponibilità"), benefitAt);
+    const magnitude = -signed;
+    const bucket = purchases.get(name) ?? [];
+    bucket.push({
+      time: date,
+      nominal: magnitude,
+      remainingNominal: magnitude,
+      remainingWallet: funding.wallet,
+      walletOnly: funding.walletOnly,
+      benefitOnly: funding.benefitOnly,
+    });
+    purchases.set(name, bucket);
   }
   for (const bucket of purchases.values()) bucket.sort((a, b) => a.time - b.time);
   const boundary = (bucket: { time: number }[], date: number, inclusive: boolean): number => {
@@ -93,6 +176,11 @@ export function analyzeLedger(rows: SheetCell[][]): {
     }
     return low;
   };
+  const unresolved = (index: number, reported: Cents, reviewReason: RefundReviewReason) => {
+    resolved[index] = { amountCents: reported, reviewReason };
+    refundsUnresolved++;
+  };
+  const pending: { index: number; time: number; nominal: number; reported: Cents }[] = [];
   for (let i = 0; i < records.length; i++) {
     const refund = records[i];
     if (text(refund[idx("Tipo")]) !== "🔄 Rimborso") continue;
@@ -107,50 +195,56 @@ export function analyzeLedger(rows: SheetCell[][]): {
     const nominal = cents(refund[idx("Importo")]);
     const refundTime = time(refund[idx("Data")]);
     if (nominal === null || nominal <= 0 || refundTime === null) {
-      resolved[i] = { amountCents: reported, reviewReason: "invalid_refund_details" };
-      refundsUnresolved++;
+      unresolved(i, reported, "invalid_refund_details");
       continue;
     }
-    const name = merchantName(refund[idx("Nome")]);
-    const bucket = name ? (purchases.get(JSON.stringify([name, -nominal])) ?? []) : [];
-    const first = boundary(bucket, refundTime - maxDistance, false);
-    const last = boundary(bucket, refundTime, true);
-    const candidateCount = last - first;
-    if (candidateCount !== 1) {
-      resolved[i] = {
-        amountCents: reported,
-        reviewReason: candidateCount
+    pending.push({ index: i, time: refundTime, nominal, reported });
+  }
+  // Earlier merchant refunds consume remaining wallet amount first. Equal timestamps follow
+  // reverse-chronological file order, so the later row is the earlier movement.
+  pending.sort((a, b) => a.time - b.time || b.index - a.index);
+  for (const refund of pending) {
+    const name = merchantName(records[refund.index][idx("Nome")]);
+    const bucket = name ? (purchases.get(name) ?? []) : [];
+    const first = boundary(bucket, refund.time - maxDistance, false);
+    const last = boundary(bucket, refund.time, true);
+    const fits: RefundFit[] = [];
+    for (let cursor = first; cursor < last && fits.length < 2; cursor++) {
+      const fit = refundFit(bucket[cursor], refund.nominal);
+      if (fit) fits.push(fit);
+    }
+    if (fits.length !== 1) {
+      unresolved(
+        refund.index,
+        refund.reported,
+        fits.length > 1
           ? "ambiguous_refund_purchase"
-          : "refund_purchase_not_in_export",
-      };
-      refundsUnresolved++;
+          : unmatchedReason(bucket, first, last, refund.nominal),
+      );
       continue;
     }
-    const original = records[bucket[first].index];
-    const originalAmount = cents(original[idx("Disponibilità")]);
-    const walletSpent =
-      originalAmount === null && !text(original[idx("Disponibilità")]) ? 0 : originalAmount;
-    const benefitFields = ["Buoni Pasto", "FlexBen"].filter((name) => idx(name) >= 0);
-    const benefitSum = benefitFields.reduce<number | null>((sum, name) => {
-      if (sum === null) return null;
-      const raw = original[idx(name)];
-      const value = !text(raw) ? 0 : cents(raw);
-      return value === null ? null : makeCents(sum + value);
-    }, 0);
-    // A fully refunded merchant purchase must have a consistent funding split.
-    if (
-      walletSpent === null ||
-      walletSpent > 0 ||
-      benefitSum === null ||
-      walletSpent + benefitSum !== -nominal
-    ) {
-      resolved[i] = { amountCents: reported, reviewReason: "refund_purchase_funding_mismatch" };
-      refundsUnresolved++;
+    const fit = fits[0];
+    if (fit.kind === "inconsistent") {
+      unresolved(refund.index, refund.reported, "refund_purchase_funding_mismatch");
       continue;
     }
-    const refundedCents = walletSpent === 0 ? makeCents(0)! : negateCents(walletSpent);
-    resolved[i] = { amountCents: refundedCents, adjusted: refundedCents !== reported };
-    if (refundedCents !== reported) refundsAdjusted++;
+    if (fit.kind === "unsplit") {
+      unresolved(refund.index, refund.reported, "partial_refund_split_unknown");
+      continue;
+    }
+    const refundedCents = makeCents(fit.wallet);
+    const walletLeft = fit.purchase.remainingWallet;
+    if (refundedCents === null || walletLeft === null) {
+      unresolved(refund.index, refund.reported, "invalid_refund_details");
+      continue;
+    }
+    fit.purchase.remainingNominal -= refund.nominal;
+    fit.purchase.remainingWallet = walletLeft - fit.wallet;
+    resolved[refund.index] = {
+      amountCents: refundedCents,
+      adjusted: refundedCents !== refund.reported,
+    };
+    if (refundedCents !== refund.reported) refundsAdjusted++;
   }
 
   const saldo = idx("Disponibilità dopo la transazione");

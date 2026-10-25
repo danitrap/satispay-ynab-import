@@ -63,6 +63,10 @@ function reviewMemo(reason: RefundReviewReason, description: string): string {
     refund_purchase_funding_mismatch:
       "The original purchase has inconsistent wallet/benefit funding.",
     invalid_refund_details: "The refund details cannot be verified.",
+    refund_exceeds_remaining_amount:
+      "The refund exceeds the remaining wallet amount of the original purchase.",
+    partial_refund_split_unknown:
+      "The cash and benefit split of this partial refund cannot be determined.",
   }[reason];
   const instruction = `[Satispay review] ${explanation} Using reported Disponibilità as the provisional wallet amount. Verify the cash/benefit split, correct the amount, then clear, approve and remove the orange flag.`;
   return (instruction + (description ? "\n" + description : "")).slice(0, 500);

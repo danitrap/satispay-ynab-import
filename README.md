@@ -323,15 +323,21 @@ The importer enforces valid dates, approved Satispay status (`✅ Approvato`), u
 
 Some Satispay exports display the **entire refunded purchase value** in the wallet availability field, even when part of that purchase originally used meal vouchers or other benefits.
 
-For a `🔄 Rimborso` row, the importer looks for **exactly one** original `🏬 a un Negozio` purchase with:
+For a `🔄 Rimborso` row, the importer looks for approved `🏬 a un Negozio` purchases with:
 
 - The same merchant name (case- and whitespace-normalized)
-- The opposite total amount
-- An approved status
-- A preceding date, no more than **90 days** before the refund
+- A date no more than **90 days** before the refund, through the refund's own time
 - A consistent allocation between wallet availability and benefit columns
 
-If the match is unambiguous, only the originally wallet-funded amount is imported as a refund. Otherwise, a refund with usable essential data is imported using the reported `Disponibilità` as a **provisional wallet amount**, even though that amount may include benefits and temporarily overstate the cash balance. Missing purchases, multiple matches, inconsistent funding and unverifiable refund details receive an orange flag and a memo explaining the assumption and what to check. They remain **uncleared and unapproved**.
+Each original purchase can fund refunds only up to its own wallet amount. Earlier merchant refunds consume that remaining wallet amount first, so one purchase cannot be matched twice.
+
+The wallet amount is imported when exactly one purchase can absorb the refund:
+
+- A refund of the purchase's full remaining nominal amount restores the purchase's remaining wallet amount. A mixed purchase refunded in full therefore imports only the cash that originally left the wallet, and that purchase is fully consumed.
+- A smaller refund matches only when the purchase was funded entirely by the cash wallet or entirely by benefits, so the wallet amount is the refund's nominal amount, or zero when the purchase used no cash. Several of these refunds match while their sum does not exceed the purchase.
+- A partial refund of a mixed purchase stays provisional. Its cash and benefit split cannot be determined, and it does not consume the purchase.
+
+Otherwise the refund is imported using the reported `Disponibilità` as a **provisional wallet amount**, even though that amount may include benefits and temporarily overstate the cash balance. A missing original purchase, more than one purchase that could absorb the refund, inconsistent funding, a refund above the remaining wallet amount, and unverifiable refund details receive an orange flag and a memo explaining the assumption and what to check. They remain **uncleared and unapproved**.
 
 In YNAB, verify the wallet/benefit split, correct the amount if needed, then clear, approve and remove the orange flag. The original payee is preserved and the source description follows the review instructions within YNAB's 500-character memo limit. Ordinary transactions remain cleared and unapproved.
 
@@ -437,7 +443,7 @@ Test `GET /health` without credentials. For authenticated endpoints, configure a
 - Sensitive transaction details are not included in aggregate API responses.
 - Exports are parsed in memory, with strict request-size limits.
 - YNAB categories, real transfers, approval and reconciliation remain manual.
-- A refund whose original purchase is missing or ambiguous is imported provisionally for review; include a broader history to improve interpretation before the first import.
+- A refund whose original purchase is missing, ambiguous, only partly refunded from mixed funding, or larger than the remaining wallet amount is imported provisionally for review; include a broader history to improve interpretation before the first import.
 - Ordinary transactions are cleared and unapproved. Provisional transactions are orange-flagged, uncleared and unapproved.
 - If the Worker reports an uncertain YNAB response, inspect YNAB before resubmitting.
 - A lost connection may leave an import partially completed without a final summary; no export or job state is persisted.

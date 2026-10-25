@@ -43,6 +43,10 @@ A Satispay movement returning value from an earlier merchant purchase. Its nomin
 The merchant purchase to which a merchant refund relates. Its funding split provides evidence of the refund's wallet amount.
 _Avoid_: Matched transaction, which refers to a YNAB transaction.
 
+**Remaining wallet amount**:
+The part of an original purchase's wallet amount not yet absorbed by a matched merchant refund. Further refunds can use that purchase only up to this amount.
+_Avoid_: Wallet balance, nominal amount, provisional wallet amount.
+
 ### Import selection and identity
 
 **YNAB plan**:
@@ -89,7 +93,7 @@ _Avoid_: Original purchase, duplicate import candidate.
 ### Review and reconciliation
 
 **Ambiguous transaction**:
-A Satispay movement whose wallet amount cannot be established with certainty from the available export evidence. Missing purchase history, multiple possible original purchases and inconsistent funding splits can cause ambiguity.
+A Satispay movement whose wallet amount cannot be established with certainty from the available export evidence. Missing purchase history, multiple possible original purchases, inconsistent funding splits, a refund above the remaining wallet amount, and a partial refund whose funding split cannot be determined can cause ambiguity.
 _Avoid_: Rejected movement, uncertain import outcome.
 
 **Provisional wallet amount**:
