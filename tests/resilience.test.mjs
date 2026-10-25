@@ -95,7 +95,7 @@ test("a transient GET failure can recover on the next attempt", { timeout: 5000 
         findAccountsEffect.pipe(Effect.provide(requestLiveLayer(env, fetchFn))),
       );
       yield* TestClock.adjust("200 millis");
-      assert.deepEqual(yield* Fiber.join(fiber), { matches: [] });
+      assert.deepEqual(yield* Fiber.join(fiber), { matches: [], truncated: false });
       assert.equal(calls, 2);
     }),
   );

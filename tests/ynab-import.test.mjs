@@ -233,8 +233,57 @@ test("account discovery only returns accounts named Satispay", async () => {
       { status: 200 },
     );
   const r = await runAccountDiscovery({ YNAB_TOKEN: "test" }, mock);
+  assert.equal(r.truncated, false);
   assert.equal(r.matches.length, 1);
   assert.equal(r.matches[0].accountId, "sat");
+});
+
+test("account discovery reports truncation after the first 20 plans", async () => {
+  const plans = Array.from({ length: 21 }, (_, index) => ({
+    id: `plan-${index + 1}`,
+    name: `Budget ${index + 1}`,
+  }));
+  const calls = [];
+  const mock = async (url) => {
+    const path = String(url);
+    calls.push(path);
+    if (path.endsWith("/plans")) return Response.json({ data: { plans } });
+    const planId = path.match(/\/plans\/([^/]+)\/accounts$/)?.[1];
+    const named =
+      planId === "plan-1" || planId === "plan-20" || planId === "plan-21"
+        ? [{ id: `sat-${planId}`, name: "Satispay", on_budget: true, closed: false }]
+        : [];
+    return Response.json({ data: { accounts: named } });
+  };
+  const r = await runAccountDiscovery({ YNAB_TOKEN: "test" }, mock);
+  assert.equal(r.truncated, true);
+  assert.deepEqual(
+    r.matches.map((match) => match.accountId),
+    ["sat-plan-1", "sat-plan-20"],
+  );
+  assert.deepEqual(
+    calls.filter((path) => path.includes("/accounts")),
+    plans.slice(0, 20).map((plan) => `https://api.ynab.com/v1/plans/${plan.id}/accounts`),
+  );
+});
+
+test("account discovery inspects every plan when YNAB returns 20", async () => {
+  const plans = Array.from({ length: 20 }, (_, index) => ({
+    id: `plan-${index + 1}`,
+    name: `Budget ${index + 1}`,
+  }));
+  let accountLookups = 0;
+  const mock = async (url) => {
+    if (String(url).endsWith("/plans")) return Response.json({ data: { plans } });
+    accountLookups++;
+    return Response.json({
+      data: { accounts: [{ id: "sat", name: "Satispay", on_budget: true, closed: false }] },
+    });
+  };
+  const r = await runAccountDiscovery({ YNAB_TOKEN: "test" }, mock);
+  assert.equal(r.truncated, false);
+  assert.equal(r.matches.length, 20);
+  assert.equal(accountLookups, 20);
 });
 
 test("matched transaction IDs do not inflate processed movement count", async () => {
