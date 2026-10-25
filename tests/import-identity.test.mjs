@@ -1,14 +1,19 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Effect } from "effect";
+import { importPrepared } from "../src/application/import-prepared.ts";
+import { YnabGateway } from "../src/application/ynab-gateway.ts";
+import { buildPreparedImport } from "../src/prepared-import.ts";
 import { handleRequestEffect } from "../src/index.ts";
+import { appConfigLayer } from "../src/infrastructure/app-config.ts";
 import { requestLiveLayer } from "../src/main.ts";
 import { importIdEffect } from "../src/ynab.ts";
 import { WorkbookReader } from "../src/workbook-reader.ts";
 
 // Pinned import identities for these synthetic Satispay movement identifiers.
 // The literals are today's `SPS:` + SHA-256 values. Recomputing them here would
-// hide a change that creates duplicate YNAB transactions.
+// hide a change that creates duplicate YNAB transactions. The import use case
+// computes them while translating a movement into a YNAB transaction.
 const PURCHASE_ID = "synthetic-movement-purchase";
 const REFUND_ID = "synthetic-movement-refund";
 const TOP_UP_ID = "synthetic-movement-topup";
@@ -152,5 +157,51 @@ test("the exported import identity is the pinned SPS value of the Satispay movem
       expected.importId,
       expected.movementId,
     );
+  }
+});
+
+test("the import use case translation keeps the pinned import identity", async () => {
+  const prepared = buildPreparedImport(rows, env.YNAB_IMPORT_FROM);
+  let submitted;
+  const outcome = await Effect.runPromise(
+    importPrepared(prepared.preparedImport).pipe(
+      Effect.provideService(YnabGateway, {
+        listAccounts: () => Effect.die("import does not list accounts"),
+        readAccount: () =>
+          Effect.succeed({
+            id: "wallet",
+            name: "Satispay",
+            onBudget: true,
+            closed: false,
+            deleted: false,
+          }),
+        createImportBatch: (batch) => {
+          submitted = batch.transactions;
+          return Effect.succeed({
+            transactionIds: batch.transactions.map((transaction) => transaction.importId),
+            duplicateImportIds: [],
+          });
+        },
+      }),
+      Effect.provide(appConfigLayer(env)),
+    ),
+  );
+  assert.equal(outcome.confirmed, 4);
+  assert.equal(outcome.duplicate, 0);
+  assert.equal(outcome.failed, 0);
+  assert.equal(outcome.uncertain, 0);
+  assert.equal(outcome.unattempted, 0);
+  assert.equal(submitted.length, 4);
+  for (const expected of IMPORT_IDENTITIES) {
+    const matches = submitted.filter(
+      (transaction) =>
+        transaction.date === expected.date &&
+        transaction.amountMilliunits === expected.amount &&
+        transaction.cleared === expected.cleared &&
+        transaction.approved === false &&
+        (transaction.flagColor ?? undefined) === expected.flag,
+    );
+    assert.equal(matches.length, 1, expected.movementId);
+    assert.equal(matches[0].importId, expected.importId, expected.movementId);
   }
 });
