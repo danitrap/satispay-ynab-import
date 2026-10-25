@@ -1,7 +1,7 @@
 import type { YnabAccountId, YnabPlanId } from "./domain.ts";
 import type { Effect } from "effect";
 import type { YnabReadFailure, YnabAccountFailure, YnabImportFailure } from "./errors.ts";
-import type { ImportPlan } from "./import-plan.ts";
+import type { YnabImportCandidate } from "./prepared-import.ts";
 
 export type YnabAccount = {
   readonly id: YnabAccountId;
@@ -36,5 +36,7 @@ export type YnabImportResult = {
 export interface YnabServiceApi {
   readonly findAccounts: Effect.Effect<YnabAccounts, YnabReadFailure>;
   readonly validateAccount: Effect.Effect<YnabAccount, YnabAccountFailure>;
-  readonly importPlan: (plan: ImportPlan) => Effect.Effect<YnabImportResult, YnabImportFailure>;
+  readonly submitPreparedImport: (prepared: {
+    readonly candidates: readonly YnabImportCandidate[];
+  }) => Effect.Effect<YnabImportResult, YnabImportFailure>;
 }

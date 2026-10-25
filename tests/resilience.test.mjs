@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import { Clock, Effect, Fiber, Logger, Metric } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
 import { requestLiveLayer } from "../src/main.ts";
-import { findAccountsEffect, importPlanEffect } from "../src/ynab-service.ts";
+import { findAccountsEffect, submitPreparedImportEffect } from "../src/ynab-service.ts";
 import worker, { handleRequestEffect } from "../src/index.ts";
 import {
   operationCount,
@@ -20,7 +20,7 @@ const env = {
   YNAB_WRITE_ENABLED: "true",
 };
 const account = { id: "wallet", name: "Satispay", on_budget: true, closed: false };
-const plan = {
+const prepared = {
   counts: { rejected: 0 },
   candidates: [
     {
@@ -110,7 +110,10 @@ test("a server error after POST is uncertain and never retried", async () => {
     return new Response("private server diagnostics", { status: 503 });
   };
   const error = await Effect.runPromise(
-    importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, fetchFn)), Effect.flip),
+    submitPreparedImportEffect(prepared).pipe(
+      Effect.provide(requestLiveLayer(env, fetchFn)),
+      Effect.flip,
+    ),
   );
   assert.equal(error._tag, "YnabImportBatchError");
   assert.equal(error.reason._tag, "YnabImportUncertainError");
@@ -147,7 +150,10 @@ test(
     await clocked(
       Effect.gen(function* () {
         const fiber = yield* Effect.forkChild(
-          importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, fetchFn)), Effect.flip),
+          submitPreparedImportEffect(prepared).pipe(
+            Effect.provide(requestLiveLayer(env, fetchFn)),
+            Effect.flip,
+          ),
         );
         yield* Effect.promise(() => postStarted);
         yield* TestClock.adjust("10 seconds");
@@ -429,7 +435,7 @@ test("malformed YNAB envelopes and payloads keep read and uncertain write failur
     assert.equal(reads, 1);
     let writes = 0;
     const writeError = await Effect.runPromise(
-      importPlanEffect(plan).pipe(
+      submitPreparedImportEffect(prepared).pipe(
         Effect.provide(
           requestLiveLayer(env, async (_url, init) => {
             if (init.method === "GET") return Response.json({ data: { account } });

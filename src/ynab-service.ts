@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import type { ImportPlan } from "./import-plan.ts";
+import type { YnabImportCandidate } from "./prepared-import.ts";
 import type { YnabServiceApi } from "./ynab-contract.ts";
 import { makeYnabClient } from "./ynab.ts";
 
@@ -12,5 +12,6 @@ export const ynabHttpLayer = Layer.effect(YnabService, makeYnabClient);
 
 export const ynabTestLayer = (service: YnabServiceApi) => Layer.succeed(YnabService, service);
 export const findAccountsEffect = Effect.flatMap(YnabService, (service) => service.findAccounts);
-export const importPlanEffect = (plan: ImportPlan) =>
-  Effect.flatMap(YnabService, (service) => service.importPlan(plan));
+export const submitPreparedImportEffect = (prepared: {
+  readonly candidates: readonly YnabImportCandidate[];
+}) => Effect.flatMap(YnabService, (service) => service.submitPreparedImport(prepared));

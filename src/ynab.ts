@@ -19,7 +19,7 @@ import {
 } from "./errors.ts";
 export { YnabError } from "./errors.ts";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
-import type { ImportCandidate, ImportPlan } from "./import-plan.ts";
+import type { YnabImportCandidate } from "./prepared-import.ts";
 
 // Preserve the existing envelope contract separately from operation-specific payloads.
 const YnabEnvelopeSchema = Schema.Struct({
@@ -70,7 +70,7 @@ export function importIdEffect(satispayId: SatispayTransactionId) {
 }
 
 export function buildYnabTransactionsEffect(
-  candidates: ImportCandidate[],
+  candidates: readonly YnabImportCandidate[],
   accountId: YnabAccountId,
 ) {
   return Effect.forEach(
@@ -236,14 +236,16 @@ export const makeYnabClient = Effect.gen(function* () {
     return account;
   });
 
-  const sendToYnabEffect = Effect.fn("satispay.ynab.importPlan")(function* (plan: ImportPlan) {
+  const sendToYnabEffect = Effect.fn("satispay.ynab.submitPreparedImport")(function* (prepared: {
+    readonly candidates: readonly YnabImportCandidate[];
+  }) {
     if (!(yield* config.writesEnabled))
       return yield* Effect.fail(
         new YnabWriteDisabledError({
           message: "YNAB write disabled: set YNAB_WRITE_ENABLED=true",
         }),
       );
-    if (plan.candidates.length > 10_000)
+    if (prepared.candidates.length > 10_000)
       return yield* Effect.fail(new YnabImportRejectedError({ reason: "BatchTooLarge" }));
     const target = yield* config.target;
     yield* validateTargetAccountEffect(target);
@@ -255,13 +257,13 @@ export const makeYnabClient = Effect.gen(function* () {
       confirmed: 0,
       uncertain: 0,
       failed: 0,
-      notAttempted: plan.candidates.length,
+      notAttempted: prepared.candidates.length,
     };
     const token = target.token;
     // Sequential batches: never retry a POST or continue after an uncertain write.
-    for (let offset = 0; offset < plan.candidates.length; offset += 500) {
+    for (let offset = 0; offset < prepared.candidates.length; offset += 500) {
       const transactions = yield* buildYnabTransactionsEffect(
-        plan.candidates.slice(offset, offset + 500),
+        prepared.candidates.slice(offset, offset + 500),
         target.accountId,
       ).pipe(Effect.mapError((reason) => new YnabImportBatchError({ reason, progress })));
       const size = transactions.length;
@@ -313,6 +315,6 @@ export const makeYnabClient = Effect.gen(function* () {
   return {
     findAccounts: findSatispayAccountsEffect(),
     validateAccount: Effect.flatMap(config.target, validateTargetAccountEffect),
-    importPlan: sendToYnabEffect,
+    submitPreparedImport: sendToYnabEffect,
   } satisfies YnabServiceApi;
 });

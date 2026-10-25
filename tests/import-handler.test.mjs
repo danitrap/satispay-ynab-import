@@ -35,7 +35,7 @@ test("prepare rejects impossible cutoff dates as configuration errors", async ()
   assert.match(body.error, /YNAB_IMPORT_FROM/);
 });
 
-test("prepare builds a real workbook plan without YNAB credentials or a write switch", async () => {
+test("prepare builds a prepared import without YNAB credentials or a write switch", async () => {
   const response = await runRequest("prepare", { YNAB_WRITE_ENABLED: "invalid" });
   assert.equal(response.status, 200);
   const body = await response.json();
@@ -53,7 +53,7 @@ test("prepare builds a real workbook plan without YNAB credentials or a write sw
   assert.equal(outcome.summary.eligible, 1);
 });
 
-test("imports default to disabled and preserve the plan summary in the refusal", async () => {
+test("imports default to disabled and preserve the prepared-import summary in the refusal", async () => {
   const response = await runRequest("import");
   assert.equal(response.status, 403);
   const body = await response.json();
@@ -93,7 +93,7 @@ test("duplicate movements are excluded without blocking completion", async () =>
   assert.equal(body.rejected, 2);
   assert.equal(body.imported, 0);
   assert.equal(writes, 0);
-  assert.equal(body.issues.missing_nontext_or_duplicate_id, 2);
+  assert.equal(body.issues.missing_or_duplicate_id, 2);
 });
 
 const targetBindings = {

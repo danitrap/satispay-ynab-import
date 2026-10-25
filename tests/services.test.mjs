@@ -7,10 +7,10 @@ import {
   YnabService,
   ynabTestLayer,
   findAccountsEffect,
-  importPlanEffect,
+  submitPreparedImportEffect,
 } from "../src/ynab-service.ts";
 
-const plan = { counts: { rejected: 0 }, candidates: [] };
+const prepared = { counts: { rejected: 0 }, candidates: [] };
 const stub = {
   findAccounts: Effect.succeed({
     matches: [
@@ -30,7 +30,7 @@ const stub = {
     on_budget: true,
     closed: false,
   }),
-  importPlan: () =>
+  submitPreparedImport: () =>
     Effect.succeed({
       submitted: 1,
       processed: 0,
@@ -42,9 +42,9 @@ const stub = {
 test("test Layer supplies an isolated YNAB service without any HTTP", () => {
   const program = Effect.gen(function* () {
     const service = yield* YnabService;
-    assert.equal(typeof service.importPlan, "function");
+    assert.equal(typeof service.submitPreparedImport, "function");
     const accounts = yield* findAccountsEffect;
-    const outcome = yield* importPlanEffect(plan);
+    const outcome = yield* submitPreparedImportEffect(prepared);
     return { accounts, outcome };
   });
   return Effect.runPromise(program.pipe(Effect.provide(ynabTestLayer(stub)))).then((result) => {
@@ -57,9 +57,11 @@ test("test Layer supplies an isolated YNAB service without any HTTP", () => {
 test("test Layer failures remain typed Effect failures", () => {
   const layer = ynabTestLayer({
     ...stub,
-    importPlan: () => Effect.fail(new YnabError("Simulated YNAB failure")),
+    submitPreparedImport: () => Effect.fail(new YnabError("Simulated YNAB failure")),
   });
-  return Effect.runPromiseExit(importPlanEffect(plan).pipe(Effect.provide(layer))).then((exit) => {
+  return Effect.runPromiseExit(
+    submitPreparedImportEffect(prepared).pipe(Effect.provide(layer)),
+  ).then((exit) => {
     assert.equal(exit._tag, "Failure");
   });
 });
@@ -93,7 +95,9 @@ test("live Layer with fake transport rejects malformed YNAB account before any P
   return assert
     .rejects(
       Effect.runPromise(
-        importPlanEffect(populated).pipe(Effect.provide(requestLiveLayer(env, mockFetch))),
+        submitPreparedImportEffect(populated).pipe(
+          Effect.provide(requestLiveLayer(env, mockFetch)),
+        ),
       ),
       /Target must be/,
     )
@@ -110,7 +114,7 @@ test("disabled live Layer prevents all network calls", () => {
   return assert
     .rejects(
       Effect.runPromise(
-        importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, mockFetch))),
+        submitPreparedImportEffect(prepared).pipe(Effect.provide(requestLiveLayer(env, mockFetch))),
       ),
       /disabled/,
     )

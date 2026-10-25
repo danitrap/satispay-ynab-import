@@ -19,8 +19,7 @@ import { Effect, Layer } from "effect";
 
 /**
  * Italian column names and status labels stay in this module.
- * Preview parses with `parseSatispayExport` and classifies the movements.
- * Prepared import still reads rows until it adopts the same classification.
+ * Preview and prepared import both parse with `parseSatispayExport` and classify the movements.
  */
 
 const COLUMN = {

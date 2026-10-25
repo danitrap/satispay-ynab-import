@@ -1,11 +1,10 @@
-import type { PlanInputReason } from "./domain.ts";
 import { failureMessage } from "./failure-message.ts";
 import { Data } from "effect";
 import type { ConfigurationError } from "./application/app-config.ts";
-import type { summarizeImportPlan } from "./import-plan.ts";
+import type { PreparedImportInputReason, PreparedImportSummary } from "./prepared-import.ts";
 import type { YnabImportResult } from "./ynab-contract.ts";
 
-export type ImportSummary = ReturnType<typeof summarizeImportPlan>;
+export type ImportSummary = PreparedImportSummary;
 
 export class YnabError extends Data.TaggedError("YnabError")<{ readonly message: string }> {
   constructor(message: string) {
@@ -79,8 +78,8 @@ export type YnabImportFailure =
   | YnabImportBatchError;
 export type YnabFailure = YnabImportFailure;
 
-export class ImportPlanError extends Data.TaggedError("ImportPlanError")<{
-  readonly reason: PlanInputReason;
+export class PreparedImportError extends Data.TaggedError("PreparedImportError")<{
+  readonly reason: PreparedImportInputReason;
 }> {
   override get message(): string {
     return failureMessage(this);

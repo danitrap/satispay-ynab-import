@@ -1,4 +1,5 @@
-import { parseLocalizedNumber, PlanInputError, WorksheetInputError } from "./domain.ts";
+import { parseLocalizedNumber, WorksheetInputError } from "./domain.ts";
+import { PreparedImportInputError } from "./prepared-import.ts";
 import { WorkbookReader } from "./workbook-reader.ts";
 import { observeOperation } from "./telemetry.ts";
 import { WorkbookError } from "./errors.ts";
@@ -118,7 +119,7 @@ export const readSheetEffect = Effect.fn("satispay.workbook")(function* (file: A
 
 /** Normalize only declared input errors; preserve the identity of unexpected defects. */
 const analysisFailure = (error: unknown) =>
-  error instanceof WorksheetInputError || error instanceof PlanInputError
+  error instanceof WorksheetInputError || error instanceof PreparedImportInputError
     ? Effect.fail(new WorkbookError("Cannot parse XLSX workbook. Check the exported Excel file."))
     : Effect.die(error);
 

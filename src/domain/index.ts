@@ -1,7 +1,6 @@
 /**
  * Domain layer for pure movement rules.
- * Movement classification, refund matching and the wallet balance check live here.
- * Prepared import still uses the legacy row ledger until it adopts this classification.
+ * Movement classification, refund matching, the wallet balance check and prepared import live here.
  * This layer imports nothing from the application, infrastructure or HTTP layers, and nothing from Effect.
  */
 export type {
@@ -14,6 +13,8 @@ export type {
   SatispayMovementKind,
 } from "./satispay-movement.ts";
 export { classifyMovements } from "./movement-classification.ts";
+export { prepareImport } from "./prepared-import.ts";
+export type { PreparedImport } from "./prepared-import.ts";
 export type {
   AmbiguityReason,
   ClassifiedMovement,

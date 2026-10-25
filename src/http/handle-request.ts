@@ -287,7 +287,7 @@ export const handleRequestEffect = Effect.fnUntraced(
               422,
             ),
           ),
-        ImportPlanError: (error) =>
+        PreparedImportError: (error) =>
           Effect.succeed(json({ ok: false, error: error.message, imported: 0 }, 422)),
         ImportFailedError: (error) =>
           Effect.succeed(

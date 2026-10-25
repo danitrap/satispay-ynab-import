@@ -11,7 +11,8 @@ import type { MovementAmount, SatispayExportRead, SatispayMovement } from "./sat
 /**
  * Pure movement classification for one Satispay export.
  * Merchant-refund matching sees every movement, including those before an import cutoff.
- * Preview calls this without an import cutoff. Nothing here throws or imports Effect.
+ * Preview calls this without an import cutoff. Prepared import calls it with one.
+ * Nothing here throws or imports Effect.
  */
 
 /** A movement whose essential data or Satispay approval cannot be imported. */

@@ -19,7 +19,7 @@ export type SatispayMovement = {
   readonly description: string;
 };
 
-/** A numeric cell is not a usable identifier: a spreadsheet can rewrite it. */
+/** A numeric value is not a usable identifier: the export can rewrite it. */
 export type SatispayMovementIdentifier =
   | { readonly _tag: "Unique"; readonly value: string }
   | { readonly _tag: "Duplicate"; readonly value: string }
@@ -30,7 +30,7 @@ export type SatispayMovementDate =
   | { readonly _tag: "Valid"; readonly calendarDate: CalendarDate; readonly instantMs: number }
   | { readonly _tag: "Invalid" };
 
-/** `Absent` is an empty cell. A parsed zero stays an amount. */
+/** `Absent` means the amount was not reported. A parsed zero stays an amount. */
 export type MovementAmount =
   | { readonly _tag: "Amount"; readonly cents: Cents }
   | { readonly _tag: "Absent" }
