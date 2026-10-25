@@ -1,15 +1,14 @@
+import { PlanInputError, WorksheetInputError, type Milliunits } from "./domain.ts";
 import {
-  calendarDate,
-  centsToMilliunits,
-  makeCents,
-  PlanInputError,
-  WorksheetInputError,
-  type Cents,
-  type Milliunits,
-} from "./domain.ts";
-/** A conservative, side-effect-free proposed YNAB import plan for Satispay. */
-import { analyzeLedger } from "./ledger.ts";
+  classifyMovements,
+  type ClassifiedMovement,
+  type MovementClassification,
+} from "./domain/movement-classification.ts";
+import { parseSatispayExport } from "./infrastructure/satispay-export-reader.ts";
+
+/** A cell from a decoded Satispay export. Preview no longer classifies cells itself. */
 export type Cell = string | number | boolean | Date | null | undefined;
+
 export type PreviewRow = {
   decision: "include" | "skip" | "review";
   reason: string;
@@ -18,109 +17,68 @@ export type PreviewRow = {
   provisional?: boolean;
 };
 
-function cellText(value: Cell): string {
-  return value === undefined || value === null ? "" : String(value).trim();
-}
-function isValidDate(value: Cell): boolean {
-  if (value instanceof Date) return !Number.isNaN(value.getTime());
-  return typeof value === "string" && calendarDate(value.trim()) !== null;
-}
-function totalMilliunits(value: number): Milliunits {
-  const cents = makeCents(value);
-  const result = cents === null ? null : centsToMilliunits(cents);
-  if (result === null) throw new PlanInputError("AmountOverflow");
-  return result;
-}
-function classify(
-  type: string,
-  amountCents: Cents,
-  status: string,
-  dateValid: boolean,
-  validId: boolean,
-): PreviewRow {
-  if (!validId) return { decision: "review", reason: "missing_or_duplicate_id", type };
-  if (!dateValid) return { decision: "review", reason: "invalid_date", type };
-  if (status !== "✅ Approvato") return { decision: "review", reason: "not_approved", type };
-  const amount = centsToMilliunits(amountCents);
-  if (amount === null) return { decision: "review", reason: "invalid_availability_amount", type };
-  return {
-    decision: "include",
-    reason: amountCents < 0 ? "wallet_outflow" : "wallet_inflow",
-    type,
-    amountMilliunits: amount,
-  };
+const headerError = (reason: "EmptyExport" | "MissingColumns" | "MissingMovementIdentifier") => {
+  switch (reason) {
+    case "EmptyExport":
+      return new WorksheetInputError("EmptyWorksheet");
+    case "MissingColumns":
+      return new WorksheetInputError("MissingColumns");
+    case "MissingMovementIdentifier":
+      return new WorksheetInputError("MissingIdColumn");
+  }
+};
+
+function presentRow(classified: ClassifiedMovement): PreviewRow {
+  const type = classified.movement.typeLabel || "(vuoto)";
+  switch (classified._tag) {
+    case "SkippedMovement":
+      return { decision: "skip", reason: classified.reason, type };
+    case "RejectedMovement":
+      return { decision: "review", reason: classified.reason, type };
+    case "ProvisionalTransaction":
+      return {
+        decision: "include",
+        reason: classified.reason,
+        type,
+        amountMilliunits: classified.amountMilliunits,
+        provisional: true,
+      };
+    case "ImportCandidate":
+      return {
+        decision: "include",
+        reason: classified.walletAmount < 0 ? "wallet_outflow" : "wallet_inflow",
+        type,
+        amountMilliunits: classified.amountMilliunits,
+      };
+  }
 }
 
-export function previewSatispay(rows: Cell[][]) {
-  if (!rows.length) throw new WorksheetInputError("EmptyWorksheet");
-  const [headers, ...unfiltered] = rows;
-  const data = unfiltered.filter((row) => row.some((value) => cellText(value) !== ""));
-  const ledger = analyzeLedger([headers, ...data]);
-  const fields = headers.map(cellText);
-  const find = (name: string) => fields.indexOf(name);
-  const required = ["Data", "Importo", "Disponibilità", "Tipo", "Stato"];
-  if (required.some((name) => find(name) < 0)) throw new WorksheetInputError("MissingColumns");
-  const idIndex = fields.findIndex((name) => name === "ID" || name.startsWith("ID ("));
-  if (idIndex < 0) throw new WorksheetInputError("MissingIdColumn");
-  const idCounts = new Map<string, number>();
-  for (const row of data) {
-    const id = cellText(row[idIndex]);
-    if (id) idCounts.set(id, (idCounts.get(id) ?? 0) + 1);
-  }
-  const all: PreviewRow[] = [];
+/** Whole-export preview. The domain classifies movements; this only shapes the dry-run summary. */
+function presentPreview(classification: MovementClassification) {
+  if (classification.totals._tag === "Overflow") throw new PlanInputError("AmountOverflow");
+  const totals = classification.totals;
+  const all = classification.movements.map(presentRow);
   const byType = new Map<string, { include: number; skip: number; review: number }>();
-  let outflowCents = 0;
-  let inflowCents = 0;
   const byReason = new Map<string, number>();
-  for (const [index, row] of data.entries()) {
-    const type = cellText(row[find("Tipo")]) || "(vuoto)";
-    const raw = row[find("Disponibilità")];
-    const rawText = cellText(raw);
-    const resolution = ledger.resolved[index];
-    const amountCents = resolution?.amountCents ?? null;
-    let result: PreviewRow;
-    if (rawText === "") result = { decision: "skip", reason: "no_availability_movement", type };
-    else if (resolution?.issue) result = { decision: "review", reason: resolution.issue, type };
-    else if (amountCents === null)
-      result = { decision: "review", reason: "invalid_availability_amount", type };
-    else if (amountCents === 0)
-      result = { decision: "skip", reason: "zero_availability_movement", type };
-    else {
-      const id = cellText(row[idIndex]);
-      result = classify(
-        type,
-        amountCents,
-        cellText(row[find("Stato")]),
-        isValidDate(row[find("Data")]),
-        id !== "" && typeof row[idIndex] === "string" && idCounts.get(id) === 1,
-      );
-      if (result.decision === "include" && resolution.reviewReason) {
-        result = { ...result, reason: resolution.reviewReason, provisional: true };
-      }
-    }
-    all.push(result);
-    const bucket = byType.get(type) ?? { include: 0, skip: 0, review: 0 };
+  for (const result of all) {
+    const bucket = byType.get(result.type) ?? { include: 0, skip: 0, review: 0 };
     bucket[result.decision]++;
     if (result.provisional) bucket.review++;
-    byType.set(type, bucket);
+    byType.set(result.type, bucket);
     byReason.set(result.reason, (byReason.get(result.reason) ?? 0) + 1);
-    if (result.decision === "include") {
-      if (amountCents! < 0) outflowCents += -amountCents!;
-      else inflowCents += amountCents!;
-      totalMilliunits(outflowCents);
-      totalMilliunits(inflowCents);
-    }
   }
   const count = (decision: PreviewRow["decision"]) =>
-    all.filter((x) => x.decision === decision).length;
+    all.filter((row) => row.decision === decision).length;
   // Keep arithmetic in integer cents and serialize display amounts as strings.
   // This prevents Apple Shortcuts from showing binary floating-point artifacts.
   const money = (cents: number): string => {
     const abs = Math.abs(cents);
     return `${cents < 0 ? "-" : ""}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
   };
+  const inflowCents = totals.inflowMilliunits / 10;
+  const outflowCents = totals.outflowMilliunits / 10;
   return {
-    mode: "preview-only",
+    mode: "preview-only" as const,
     rowCount: all.length,
     eligible: count("include"),
     skipped: count("skip"),
@@ -129,16 +87,23 @@ export function previewSatispay(rows: Cell[][]) {
     outflowEur: money(outflowCents),
     inflowEur: money(inflowCents),
     netEur: money(inflowCents - outflowCents),
-    outflowMilliunits: totalMilliunits(outflowCents),
-    inflowMilliunits: totalMilliunits(inflowCents),
-    netMilliunits: totalMilliunits(inflowCents - outflowCents),
+    outflowMilliunits: totals.outflowMilliunits,
+    inflowMilliunits: totals.inflowMilliunits,
+    netMilliunits: totals.netMilliunits,
     byType: Object.fromEntries([...byType.entries()]),
     byReason: Object.fromEntries([...byReason.entries()]),
-    refundsAdjusted: ledger.refundsAdjusted,
-    refundsUnresolved: ledger.refundsUnresolved,
-    balanceCheck: ledger.balanceCheck,
+    refundsAdjusted: classification.refundsAdjusted,
+    refundsUnresolved: classification.refundsUnresolved,
+    balanceCheck: classification.balanceCheck,
     imported: 0,
     message:
       "Dry run only. No transactions sent to YNAB. Transfers can be adjusted manually in YNAB.",
   };
+}
+
+/** Preview classifies the whole export and does not apply an import cutoff. */
+export function previewSatispay(rows: Cell[][]) {
+  const parsed = parseSatispayExport(rows);
+  if (parsed._tag === "HeaderError") throw headerError(parsed.reason);
+  return presentPreview(classifyMovements(parsed.satispayExport));
 }

@@ -19,7 +19,8 @@ import { Effect, Layer } from "effect";
 
 /**
  * Italian column names and status labels stay in this module.
- * The row-based preview and prepared-import path does not call this reader yet.
+ * Preview parses with `parseSatispayExport` and classifies the movements.
+ * Prepared import still reads rows until it adopts the same classification.
  */
 
 const COLUMN = {
@@ -106,7 +107,7 @@ const headerError = (
 ): Extract<ParsedExport, { _tag: "HeaderError" }> => ({ _tag: "HeaderError", reason });
 
 /** Empty rows carry no movement. The first remaining row is the header. */
-function parseSatispayExport(rows: readonly (readonly SheetCell[])[]): ParsedExport {
+export function parseSatispayExport(rows: readonly (readonly SheetCell[])[]): ParsedExport {
   const nonEmpty = rows.filter((row) => row.some((cell) => !blank(cell)));
   if (nonEmpty.length === 0) return headerError("EmptyExport");
   const [headerRow, ...body] = nonEmpty;
