@@ -4,7 +4,7 @@ import {
   type AppConfigShape,
   type AppEnv,
 } from "../application/app-config.ts";
-import { CalendarDateSchema, YnabAccountIdSchema, YnabPlanIdSchema } from "../domain-schema.ts";
+import { CalendarDateSchema, YnabAccountIdSchema, YnabPlanIdSchema } from "./boundary-schema.ts";
 import { Config, ConfigProvider, Effect, Layer, Schema } from "effect";
 
 const NonEmptyString = Schema.Trimmed.check(Schema.isMinLength(1));

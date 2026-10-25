@@ -1,6 +1,7 @@
+import { inspectXlsxEffect } from "../application/inspect.ts";
 import { listYnabAccounts } from "../application/list-ynab-accounts.ts";
-import { processImportEffect } from "../import-handler.ts";
-import { inspectXlsxEffect, previewXlsxEffect } from "../spreadsheet.ts";
+import { previewXlsxEffect } from "../application/preview.ts";
+import { processImportEffect } from "../application/process-import.ts";
 import {
   presentAccounts,
   presentConfirmRequired,

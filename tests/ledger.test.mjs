@@ -2,8 +2,8 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { classifyMovements } from "../src/domain/movement-classification.ts";
 import { parseSatispayExport } from "../src/infrastructure/satispay-export-reader.ts";
-import { buildPreparedImport } from "../src/prepared-import.ts";
-import { previewSatispay } from "../src/preview.ts";
+import { buildPreparedImport } from "../src/infrastructure/build-prepared-import.ts";
+import { previewSatispay } from "../src/infrastructure/preview-rows.ts";
 
 const headers = [
   "Data",

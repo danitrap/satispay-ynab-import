@@ -1,6 +1,6 @@
 import { AppConfig, type ConfigurationError } from "./app-config.ts";
 import { SatispayExportReader, type SatispayExportHeaderReason } from "./satispay-export-reader.ts";
-import type { CalendarDate, Milliunits } from "../domain.ts";
+import type { CalendarDate, Milliunits } from "../domain/primitives.ts";
 import type { WalletBalanceCheck } from "../domain/movement-classification.ts";
 import {
   prepareImport as prepareDomainImport,

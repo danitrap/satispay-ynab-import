@@ -7,8 +7,8 @@ import { Cause, Effect } from "effect";
 import { SatispayExportReader } from "../src/application/satispay-export-reader.ts";
 import { satispayExportReaderLayer } from "../src/infrastructure/satispay-export-reader.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import { WorkbookError } from "../src/errors.ts";
-import { WorkbookReader } from "../src/workbook-reader.ts";
+import { WorkbookError } from "../src/application/workbook-reader.ts";
+import { WorkbookReader } from "../src/application/workbook-reader.ts";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -513,14 +513,7 @@ test("column names and status labels stay in the export reader", () => {
   const reader = readFileSync(readerPath, "utf8");
   for (const label of ownedByTheReader) assert.equal(reader.includes(label), true, label);
 
-  const files = [
-    ...typescriptFiles(join(repoRoot, "src/domain")),
-    ...typescriptFiles(join(repoRoot, "src/application")),
-    ...typescriptFiles(join(repoRoot, "src/http")),
-    ...typescriptFiles(join(repoRoot, "src/infrastructure")).filter((path) => path !== readerPath),
-    join(repoRoot, "src/main.ts"),
-    join(repoRoot, "src/index.ts"),
-  ];
+  const files = typescriptFiles(join(repoRoot, "src")).filter((path) => path !== readerPath);
   for (const path of files) {
     const source = readFileSync(path, "utf8");
     for (const label of [...ownedByTheReader, "Rifiutato", "Comunicalo"]) {

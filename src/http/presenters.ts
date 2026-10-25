@@ -7,9 +7,9 @@ import {
 import type { YnabAccountListing } from "../application/list-ynab-accounts.ts";
 import type { PreparedImportError, PreparedImportSummary } from "../application/prepare-import.ts";
 import type { YnabGatewayError } from "../application/ynab-gateway.ts";
-import type { AuthorizationDecision } from "../auth.ts";
-import { type WorkbookError } from "../errors.ts";
-import { type ImportFailedError } from "../import-handler.ts";
+import type { AuthorizationDecision } from "./auth.ts";
+import { type WorkbookError } from "../application/workbook-reader.ts";
+import { type ImportFailedError } from "../application/process-import.ts";
 import { UploadError, type UploadReason } from "./upload.ts";
 
 /**

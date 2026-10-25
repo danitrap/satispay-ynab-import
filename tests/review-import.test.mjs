@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Effect } from "effect";
-import { buildPreparedImport } from "../src/prepared-import.ts";
-import { handleRequestEffect } from "../src/index.ts";
+import { buildPreparedImport } from "../src/infrastructure/build-prepared-import.ts";
+import { handleRequestEffect } from "../src/http/handle-request.ts";
 import { requestLiveLayer } from "../src/main.ts";
 import { importPrepared, reportedImportCounts } from "../src/application/import-prepared.ts";
-import { WorkbookReader } from "../src/workbook-reader.ts";
+import { WorkbookReader } from "../src/application/workbook-reader.ts";
 
 const headers = [
   "Data",

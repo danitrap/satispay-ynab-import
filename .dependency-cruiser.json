@@ -2,31 +2,45 @@
   "forbidden": [
     {
       "name": "domain-does-not-import-other-layers",
-      "comment": "The domain imports nothing from the application, infrastructure or HTTP layers. Legacy root modules under src/*.ts stay exempt until the dependency rule covers the whole tree.",
+      "comment": "The domain imports nothing from the application, infrastructure, HTTP or the composition root.",
       "severity": "error",
       "from": { "path": "^src/domain/" },
-      "to": { "path": "^src/(application|infrastructure|http)/" }
+      "to": { "path": "^src/(application|infrastructure|http|main\\.ts)" }
     },
     {
-      "name": "application-does-not-import-infrastructure-or-http",
-      "comment": "The application does not import infrastructure or HTTP. Legacy root modules under src/*.ts stay exempt until the dependency rule covers the whole tree.",
+      "name": "application-does-not-import-outward",
+      "comment": "The application imports the domain and its own ports. It does not import infrastructure, HTTP or the composition root.",
       "severity": "error",
       "from": { "path": "^src/application/" },
-      "to": { "path": "^src/(infrastructure|http)/" }
+      "to": { "path": "^src/(infrastructure|http|main\\.ts)" }
     },
     {
-      "name": "shared-errors-do-not-depend-on-application",
-      "comment": "The shared error module does not depend on application types.",
+      "name": "infrastructure-depends-inward",
+      "comment": "Infrastructure depends inward. It does not import HTTP or the composition root.",
       "severity": "error",
-      "from": { "path": "^src/errors\\.ts$" },
-      "to": { "path": "^src/application/" }
+      "from": { "path": "^src/infrastructure/" },
+      "to": { "path": "^src/(http|main\\.ts)" }
     },
     {
-      "name": "no-cycle-between-errors-and-application",
-      "comment": "Errors and the application layer do not form a cycle.",
+      "name": "http-depends-inward",
+      "comment": "HTTP depends inward. It does not import infrastructure or the composition root.",
       "severity": "error",
-      "from": { "path": "^src/(errors\\.ts|application/)" },
-      "to": { "path": "^src/(errors\\.ts|application/)", "circular": true }
+      "from": { "path": "^src/http/" },
+      "to": { "path": "^src/(infrastructure|main\\.ts)" }
+    },
+    {
+      "name": "only-composition-root-outside-the-layers",
+      "comment": "Every source module lives in a layer. src/main.ts is the only composition root, so no other src/*.ts module may exist.",
+      "severity": "error",
+      "from": { "path": "^src/[^/]+\\.ts$", "pathNot": "^src/main\\.ts$" },
+      "to": { "path": "." }
+    },
+    {
+      "name": "no-circular-dependencies",
+      "comment": "Layers depend inward and do not form a cycle.",
+      "severity": "error",
+      "from": { "path": "^src/" },
+      "to": { "path": "^src/", "circular": true }
     }
   ],
   "options": {

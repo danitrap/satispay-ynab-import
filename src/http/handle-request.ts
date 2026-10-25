@@ -1,5 +1,5 @@
 import { AppConfig } from "../application/app-config.ts";
-import { authorizeEffect, type AuthorizationDecision } from "../auth.ts";
+import { authorizeEffect, type AuthorizationDecision } from "./auth.ts";
 import {
   accountsController,
   importController,

@@ -5,14 +5,15 @@ import { TestClock, TestConsole } from "effect/testing";
 import { importPrepared } from "../src/application/import-prepared.ts";
 import { listYnabAccounts } from "../src/application/list-ynab-accounts.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import worker, { handleRequestEffect } from "../src/index.ts";
+import { handleRequestEffect } from "../src/http/handle-request.ts";
+import worker from "../src/main.ts";
 import { preparedFromCandidates } from "./support/candidate-prepared.mjs";
 import {
   operationCount,
   operationDuration,
   observeOperation,
   operationLogger,
-} from "../src/telemetry.ts";
+} from "../src/application/telemetry.ts";
 
 const env = {
   UPLOAD_TOKEN: "upload",

@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
-import worker from "../src/index.ts";
+import worker from "../src/main.ts";
 import { Effect } from "effect";
-import { handleRequestEffect } from "../src/index.ts";
+import { handleRequestEffect } from "../src/http/handle-request.ts";
 import { requestLiveLayer } from "../src/main.ts";
 import { listYnabAccounts } from "../src/application/list-ynab-accounts.ts";
 

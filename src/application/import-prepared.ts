@@ -6,7 +6,7 @@ import {
   type YnabGatewayFailureReason,
 } from "./ynab-gateway.ts";
 import { toYnabTransaction } from "./ynab-transaction.ts";
-import type { YnabAccountId } from "../domain.ts";
+import type { YnabAccountId } from "../domain/primitives.ts";
 import type { PreparedImport } from "../domain/prepared-import.ts";
 import type { ImportCandidate, ProvisionalTransaction } from "../domain/movement-classification.ts";
 import type { SatispayMovement } from "../domain/satispay-movement.ts";

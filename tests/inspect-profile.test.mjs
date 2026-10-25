@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { summarizeSheet } from "../src/spreadsheet.ts";
+import { summarizeSheet } from "../src/infrastructure/satispay-export-reader.ts";
 
 const columns = [
   "Data",

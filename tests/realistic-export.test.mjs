@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { readSheet } from "read-excel-file/universal";
 import { Effect } from "effect";
-import { handleRequestEffect } from "../src/index.ts";
+import { handleRequestEffect } from "../src/http/handle-request.ts";
 import { requestLiveLayer } from "../src/main.ts";
 import { createRealisticWorkbook } from "../scripts/generate-satispay-fixture.mjs";
 

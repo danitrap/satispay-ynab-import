@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import { importPrepared, reportedImportCounts } from "../src/application/import-prepared.ts";
 import { listYnabAccounts } from "../src/application/list-ynab-accounts.ts";
 import { importIdentity, toYnabTransaction } from "../src/application/ynab-transaction.ts";
-import { buildPreparedImport } from "../src/prepared-import.ts";
+import { buildPreparedImport } from "../src/infrastructure/build-prepared-import.ts";
 import { Effect } from "effect";
 import { requestLiveLayer } from "../src/main.ts";
 
