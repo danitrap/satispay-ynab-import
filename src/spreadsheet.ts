@@ -1,4 +1,4 @@
-import { PlanInputError, WorksheetInputError } from "./domain.ts";
+import { parseLocalizedNumber, PlanInputError, WorksheetInputError } from "./domain.ts";
 import { WorkbookReader } from "./workbook-reader.ts";
 import { observeOperation } from "./telemetry.ts";
 import { WorkbookError } from "./errors.ts";
@@ -14,22 +14,7 @@ function present(v: SheetCell): boolean {
 }
 function numberValue(v: SheetCell): number | null {
   if (!present(v) || v instanceof Date || typeof v === "boolean") return null;
-  if (typeof v === "number") return Number.isFinite(v) ? v : null;
-  let s = String(v)
-    .trim()
-    .replace(/\s|\u00a0|€/g, "")
-    .replace(/−/g, "-");
-  const parenthesized = /^\(.*\)$/.test(s);
-  if (parenthesized) s = s.slice(1, -1);
-  if (s.includes(",") && s.includes(".")) {
-    s =
-      s.lastIndexOf(",") > s.lastIndexOf(".")
-        ? s.replace(/\./g, "").replace(",", ".")
-        : s.replace(/,/g, "");
-  } else if (s.includes(",")) s = s.replace(",", ".");
-  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(s)) return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? (parenthesized ? -n : n) : null;
+  return parseLocalizedNumber(v);
 }
 function amountStats(values: SheetCell[]) {
   const out = {

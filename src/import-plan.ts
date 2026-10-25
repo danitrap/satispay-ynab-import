@@ -45,6 +45,9 @@ function text(v: SheetCell): string {
   return v === undefined || v === null ? "" : String(v).trim();
 }
 export function parseDate(value: SheetCell): CalendarDate | null {
+  // read-excel-file maps an Excel serial onto a UTC wall-clock time.
+  // The UTC calendar day is the date shown in the sheet, including 23:50 and 00:05.
+  // Local getters move those instants onto the previous or next day.
   if (value instanceof Date && !Number.isNaN(value.valueOf()))
     return calendarDate(value.toISOString().slice(0, 10));
   const s = text(value);

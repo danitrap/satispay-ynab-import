@@ -15,9 +15,36 @@ export const makeMilliunits = (value: number): Milliunits | null =>
 export const centsToMilliunits = (value: Cents): Milliunits | null => makeMilliunits(value * 10);
 export const negateCents = (value: Cents): Cents => -value as Cents;
 
+/**
+ * Excel number, or the Italian amount text Satispay writes into cells
+ * (`-12,50`, `+1.234,56`, `€ 9,90`, `(12,50)`).
+ */
+export function parseLocalizedNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  let s = value
+    .trim()
+    .replace(/\s|\u00a0|€/g, "")
+    .replace(/−/g, "-");
+  if (!s) return null;
+  const parenthesized = /^\(.*\)$/.test(s);
+  if (parenthesized) s = s.slice(1, -1);
+  if (s.includes(",") && s.includes(".")) {
+    s =
+      s.lastIndexOf(",") > s.lastIndexOf(".")
+        ? s.replace(/\./g, "").replace(",", ".")
+        : s.replace(/,/g, "");
+  } else if (s.includes(",")) s = s.replace(",", ".");
+  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(s)) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  return parenthesized ? -n : n;
+}
+
 export function parseCents(value: unknown): Cents | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  const scaled = value * 100;
+  const numeric = parseLocalizedNumber(value);
+  if (numeric === null) return null;
+  const scaled = numeric * 100;
   const rounded = Math.round(scaled);
   return Math.abs(scaled - rounded) < 0.0001 ? makeCents(rounded) : null;
 }

@@ -7,6 +7,7 @@ import {
   makeCents,
   PlanInputError,
 } from "../src/domain.ts";
+import { parseDate } from "../src/import-plan.ts";
 import { buildImportPlan } from "../src/import-plan.ts";
 import { analyzeLedger } from "../src/ledger.ts";
 import { previewSatispay } from "../src/preview.ts";
@@ -23,6 +24,21 @@ test("money constructors preserve exact cents and reject unsafe conversions", ()
   assert.equal(centsToMilliunits(makeCents(Number.MAX_SAFE_INTEGER)), null);
   assert.equal(calendarDate("2024-02-29"), "2024-02-29");
   assert.equal(calendarDate("2026-02-29"), null);
+});
+
+test("Italian amount text is cent-exact and spreadsheet datetimes keep the UTC day", () => {
+  assert.equal(parseCents("-12,50"), -1250);
+  assert.equal(parseCents("-2,5"), -250);
+  assert.equal(parseCents("+1.234,56"), 123456);
+  assert.equal(parseCents("€ 9,90"), 990);
+  assert.equal(parseCents("(12,50)"), -1250);
+  assert.equal(parseCents("−3,39"), -339);
+  assert.equal(parseCents("1.23"), 123);
+  assert.equal(parseCents("not-a-number"), null);
+  assert.equal(parseCents("1,001"), null);
+  assert.equal(parseDate(new Date("2026-10-01T00:05:00.000Z")), "2026-10-01");
+  assert.equal(parseDate(new Date("2026-09-30T23:50:00.000Z")), "2026-09-30");
+  assert.equal(parseDate(new Date("2026-10-09T00:29:59.999Z")), "2026-10-09");
 });
 
 test("unsafe wallet amounts are rejected and accumulated totals cannot silently overflow", () => {

@@ -317,7 +317,7 @@ The importer tracks **cash wallet availability**, using the Italian `Disponibili
 
 Movement types do **not** determine whether a transaction is included or considered a transfer. If `Nome` (payee) is absent or `-`, a descriptive `Satispay — <type>` fallback is used.
 
-The importer enforces valid dates, approved Satispay status (`✅ Approvato`), unique **textual** Satispay IDs and cent-exact wallet amounts. Invalid in-scope rows are excluded and counted in `rejected` and `issues`; other eligible movements proceed. An unreadable workbook or missing required columns still prevents planning the import.
+The importer enforces valid dates, approved Satispay status (`✅ Approvato`), unique **textual** Satispay IDs and cent-exact wallet amounts. A datetime keeps the calendar day shown in the export, including times just before or after midnight. Amount cells may be numbers or Italian text such as `-12,50` and `+1.234,56`. Invalid in-scope rows are excluded and counted in `rejected` and `issues`; other eligible movements proceed. An unreadable workbook or missing required columns still prevents planning the import.
 
 ### Mixed-funding refunds
 

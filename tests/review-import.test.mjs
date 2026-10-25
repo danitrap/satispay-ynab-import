@@ -110,7 +110,7 @@ test("unusable essential data never becomes a provisional YNAB transaction", asy
     row("", -1),
     row("duplicate"),
     row("duplicate"),
-    row("invalid-amount", "1.23"),
+    row("invalid-amount", "not-a-number"),
     row("pending", -1, { status: "In attesa" }),
     row("invalid-refund", -5, { type: "🔄 Rimborso" }),
   ];
