@@ -454,6 +454,31 @@ npm run dev             # Local Worker
 
 The tests use Node's built-in test runner. They cover wallet-only funding, mixed refunds, duplicate IDs, eligibility filters, YNAB result handling, HTTP failures, and Effect service Layers.
 
+### Local development
+
+`npm test` does not call YNAB and does not read Worker Secrets. It injects synthetic movements and in-memory services. `npm run dev` runs `wrangler dev`, which loads `[vars]` from `wrangler.toml` and Secrets from the Git-ignored `.dev.vars` (copied from `.dev.vars.example`). The local Worker listens on `http://localhost:8787`.
+
+~~~bash
+cp wrangler.example.toml wrangler.toml
+cp .dev.vars.example .dev.vars
+npm test
+npm run dev
+~~~
+
+Settings the Worker reads:
+
+| Setting | Where it is set locally | Role |
+| --- | --- | --- |
+| `UPLOAD_TOKEN` | `.dev.vars` | Secret. Bearer token for every route except `GET /health` |
+| `YNAB_TOKEN` | `.dev.vars` | Secret. YNAB personal access token |
+| `YNAB_PLAN_ID` | `.dev.vars` | Secret. Target YNAB plan ID |
+| `YNAB_ACCOUNT_ID` | `.dev.vars` | Secret. Destination YNAB wallet account ID. The account must be active, on-budget, and named Satispay |
+| `YNAB_IMPORT_FROM` | `[vars]` | Inclusive import cutoff, `YYYY-MM-DD`. Required to build a prepared import |
+| `YNAB_WRITES_ENABLED` | `[vars]` | Write switch. Accepted values are `"true"` and `"false"`; if absent, writes stay disabled |
+| `AUTH_FAILURE_LIMITER` | `[[ratelimits]]` binding | Optional. Ten failed upload-token checks per 60 seconds for each client address, in the Cloudflare location that handled the request. A missing binding leaves failures unthrottled |
+
+Leave the write switch `"false"` until a `/prepare` dry run looks right. `npm run check:bundle` dry-runs the Wrangler bundle and does not deploy.
+
 GitHub Actions runs the test suite, TypeScript checks, and Wrangler bundle checks on pull requests and pushes to `main`.
 
 ### Local Effect source reference
