@@ -2,9 +2,11 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Clock, Effect, Fiber, Logger, Metric } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
+import { importPrepared } from "../src/application/import-prepared.ts";
+import { listYnabAccounts } from "../src/application/list-ynab-accounts.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import { findAccountsEffect, submitPreparedImportEffect } from "../src/ynab-service.ts";
 import worker, { handleRequestEffect } from "../src/index.ts";
+import { preparedFromCandidates } from "./support/candidate-prepared.mjs";
 import {
   operationCount,
   operationDuration,
@@ -20,19 +22,16 @@ const env = {
   YNAB_WRITE_ENABLED: "true",
 };
 const account = { id: "wallet", name: "Satispay", on_budget: true, closed: false };
-const prepared = {
-  counts: { rejected: 0 },
-  candidates: [
-    {
-      satispayId: "test",
-      date: "2026-10-18",
-      amountMilliunits: -1000,
-      payee: "Shop",
-      memo: "",
-      type: "Altro",
-    },
-  ],
-};
+const prepared = preparedFromCandidates([
+  {
+    satispayId: "test",
+    date: "2026-10-18",
+    amountMilliunits: -1000,
+    payee: "Shop",
+    memo: "",
+    type: "Altro",
+  },
+]);
 const clocked = (program) => Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
 
 test(
@@ -50,13 +49,13 @@ test(
       Effect.gen(function* () {
         const start = yield* Clock.currentTimeMillis;
         const fiber = yield* Effect.forkChild(
-          findAccountsEffect.pipe(Effect.provide(requestLiveLayer(env, fetchFn)), Effect.flip),
+          listYnabAccounts.pipe(Effect.provide(requestLiveLayer(env, fetchFn)), Effect.flip),
         );
         yield* TestClock.adjust("200 millis");
         yield* TestClock.adjust("400 millis");
         const error = yield* Fiber.join(fiber);
-        assert.equal(error._tag, "YnabHttpError");
-        assert.equal(error.status, 503);
+        assert.equal(error._tag, "YnabGatewayError");
+        assert.deepEqual(error.reason, { _tag: "Http", status: 503 });
         assert.equal(calls, 3);
         assert.equal(
           signals.every((signal) => signal.aborted),
@@ -76,9 +75,10 @@ test("terminal GET failures and invalid payloads are not retried", async () => {
       return new Response("{}", { status });
     };
     const error = await Effect.runPromise(
-      findAccountsEffect.pipe(Effect.provide(requestLiveLayer(env, fetchFn)), Effect.flip),
+      listYnabAccounts.pipe(Effect.provide(requestLiveLayer(env, fetchFn)), Effect.flip),
     );
-    assert.equal(error._tag, status === 200 ? "YnabResponseError" : "YnabHttpError");
+    assert.equal(error._tag, "YnabGatewayError");
+    assert.equal(error.reason._tag, status === 200 ? "Response" : "Http");
     assert.equal(calls, 1);
   }
 });
@@ -93,7 +93,7 @@ test("a transient GET failure can recover on the next attempt", { timeout: 5000 
   await clocked(
     Effect.gen(function* () {
       const fiber = yield* Effect.forkChild(
-        findAccountsEffect.pipe(Effect.provide(requestLiveLayer(env, fetchFn))),
+        listYnabAccounts.pipe(Effect.provide(requestLiveLayer(env, fetchFn))),
       );
       yield* TestClock.adjust("200 millis");
       assert.deepEqual(yield* Fiber.join(fiber), { matches: [], truncated: false });
@@ -110,15 +110,11 @@ test("a server error after POST is uncertain and never retried", async () => {
     return new Response("private server diagnostics", { status: 503 });
   };
   const error = await Effect.runPromise(
-    submitPreparedImportEffect(prepared).pipe(
-      Effect.provide(requestLiveLayer(env, fetchFn)),
-      Effect.flip,
-    ),
+    importPrepared(prepared).pipe(Effect.provide(requestLiveLayer(env, fetchFn)), Effect.flip),
   );
-  assert.equal(error._tag, "YnabImportBatchError");
-  assert.equal(error.reason._tag, "YnabImportUncertainError");
-  assert.deepEqual(error.reason.reason, { _tag: "Http", status: 503 });
-  assert.equal(error.progress.uncertain, 1);
+  assert.equal(error._tag, "ImportBatchError");
+  assert.deepEqual(error.failure, { _tag: "Uncertain", reason: "Http", status: 503 });
+  assert.equal(error.outcome.uncertain, 1);
   assert.equal(writes, 1);
 });
 
@@ -150,7 +146,7 @@ test(
     await clocked(
       Effect.gen(function* () {
         const fiber = yield* Effect.forkChild(
-          submitPreparedImportEffect(prepared).pipe(
+          importPrepared(prepared).pipe(
             Effect.provide(requestLiveLayer(env, fetchFn)),
             Effect.flip,
           ),
@@ -158,10 +154,9 @@ test(
         yield* Effect.promise(() => postStarted);
         yield* TestClock.adjust("10 seconds");
         const error = yield* Fiber.join(fiber);
-        assert.equal(error._tag, "YnabImportBatchError");
-        assert.equal(error.reason._tag, "YnabImportUncertainError");
-        assert.deepEqual(error.reason.reason, { _tag: "Timeout" });
-        assert.equal(error.progress.uncertain, 1);
+        assert.equal(error._tag, "ImportBatchError");
+        assert.deepEqual(error.failure, { _tag: "Uncertain", reason: "Timeout" });
+        assert.equal(error.outcome.uncertain, 1);
         assert.equal(writes, 1);
         assert.equal(aborted, true);
       }),
@@ -420,7 +415,7 @@ test("malformed YNAB envelopes and payloads keep read and uncertain write failur
   ]) {
     let reads = 0;
     const readError = await Effect.runPromise(
-      findAccountsEffect.pipe(
+      listYnabAccounts.pipe(
         Effect.provide(
           requestLiveLayer(env, async () => {
             reads++;
@@ -430,12 +425,13 @@ test("malformed YNAB envelopes and payloads keep read and uncertain write failur
         Effect.flip,
       ),
     );
-    assert.equal(readError._tag, "YnabResponseError");
-    assert.equal(readError.reason, readReason);
+    assert.equal(readError._tag, "YnabGatewayError");
+    assert.equal(readError.reason._tag, readReason === "Plans" ? "Contract" : "Response");
+    if (readReason === "Plans") assert.equal(readError.operation, "listPlans");
     assert.equal(reads, 1);
     let writes = 0;
     const writeError = await Effect.runPromise(
-      submitPreparedImportEffect(prepared).pipe(
+      importPrepared(prepared).pipe(
         Effect.provide(
           requestLiveLayer(env, async (_url, init) => {
             if (init.method === "GET") return Response.json({ data: { account } });
@@ -446,10 +442,12 @@ test("malformed YNAB envelopes and payloads keep read and uncertain write failur
         Effect.flip,
       ),
     );
-    assert.equal(writeError._tag, "YnabImportBatchError");
-    assert.equal(writeError.reason._tag, "YnabImportUncertainError");
-    assert.deepEqual(writeError.reason.reason, { _tag: writeReason });
-    assert.equal(writeError.progress.uncertain, 1);
+    assert.equal(writeError._tag, "ImportBatchError");
+    assert.deepEqual(writeError.failure, {
+      _tag: "Uncertain",
+      reason: writeReason === "Json" ? "Response" : "Contract",
+    });
+    assert.equal(writeError.outcome.uncertain, 1);
     assert.equal(writes, 1);
   }
 });

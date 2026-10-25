@@ -364,14 +364,13 @@ The code separates **pure financial calculations** from **effectful I/O**.
 src/
 ├── main.ts            Worker entry and the only composition root
 ├── domain/            Domain layer for pure movement rules
-├── application/       Ports for configuration and the auth-failure rate limit
-├── infrastructure/    Cloudflare configuration and rate-limiter Layers
+├── application/       Use cases and ports: prepare import, import, list YNAB accounts
+├── infrastructure/    Satispay export reader, YNAB gateway and Cloudflare bindings
 ├── http/              Routes, authorization and bounded uploads
 ├── index.ts           Re-exports the Worker entry for existing imports
 ├── domain.ts          Pure constructors for dates, identifiers and exact money units
 ├── domain-schema.ts   Schema validation for branded boundary values
-├── errors.ts          Tagged application failures and import diagnostics
-├── failure-message.ts Safe presentation of structured failure reasons
+├── errors.ts          Workbook failures created at the decoder boundary
 ├── telemetry.ts       Operation timing and bounded outcome counters
 ├── auth.ts            Constant-time upload-token checks
 ├── spreadsheet.ts     XLSX decoding and workbook inspection
@@ -379,18 +378,15 @@ src/
 ├── csv.ts             CSV inspection
 ├── preview.ts         Presents the shared classification without an import cutoff
 ├── prepared-import.ts Builds a prepared import for /prepare and /import
-├── import-handler.ts  Decode a Satispay export, then prepare or import
-├── ynab-service.ts    YNAB Context.Service and its HTTP Layer
-├── ynab-contract.ts   Explicit, infrastructure-free YNAB operation contracts
-└── ynab.ts            Effect HttpClient, Schema validation, YNAB API
+└── import-handler.ts  Prepare an import, then submit it when the route is /import
 ~~~
 
 The Worker uses [Effect v4](https://effect.website/) throughout its asynchronous boundaries:
 
 - **`Effect.gen`** composes file decoding, validation and remote API calls with typed errors.
-- **`Context.Service`** declares the `YnabService` required by import and account-discovery operations.
+- **`Context.Service`** declares the YNAB gateway and the plan catalog used by import and account discovery.
 - **`Config` + `Schema`** validate operation-specific settings from Cloudflare bindings; `Redacted` keeps decoded tokens out of ordinary diagnostic output. Configuration failures retain only the setting name and a safe message.
-- **`Layer`** provides the HTTP-backed implementation at the Worker request boundary. `ynabTestLayer` replaces it with an in-memory service in tests.
+- **`Layer`** provides the HTTP-backed YNAB gateway at the Worker request boundary. Tests replace that gateway with an in-memory service.
 - **Effect `HttpClient` + `FetchHttpClient`** run YNAB API requests using a fetch-compatible transport suitable for Cloudflare Workers.
 - **`HttpClientResponse.schemaBodyJson` + `Schema.decodeUnknownEffect`** validate the YNAB response envelope and operation-specific payloads instead of trusting untyped responses.
 - **`Effect.forEach`** produces stable SHA-256 import IDs with bounded concurrency.
@@ -398,7 +394,7 @@ The Worker uses [Effect v4](https://effect.website/) throughout its asynchronous
 
 The domain modules stay independent of Effect. There is no global runtime holding Cloudflare request credentials; the live service Layer is provided per request.
 
-`requestLiveLayer` in `src/main.ts` is the single composition root for each request. It provides one configuration module, the optional auth-failure limiter, and the fetch transport, then builds the YNAB implementation, which closes over those dependencies. The router and import programs consume their declared requirements; `YnabServiceApi` describes public results and failures independently of the implementation. Type-level tests verify that public operations leave no infrastructure requirements for callers.
+`requestLiveLayer` in `src/main.ts` is the single composition root for each request. It provides one configuration module, the optional auth-failure limiter, and the fetch transport, then builds the YNAB gateway. `/prepare` and `/import` share the prepare-import use case; only `/import` submits that prepared import. `/ynab/accounts` discovers plans, lists each plan's accounts, and keeps the ones whose names contain Satispay. Type-level tests verify that the gateway's three operations leave no configuration requirement for callers.
 
 Account discovery, target validation and imports declare separate failure types. Uncertain HTTP writes always carry a status, and an import reuses the target configuration it validated. Workbook analysis maps declared input errors to HTTP 422 while preserving unexpected exceptions as defects. The external XLSX decoder is injectable through `WorkbookReader`, whose Effect operations declare `WorkbookError` failures and preserve unexpected defects from injected implementations. The Promise-based library is adapted inside the live service.
 

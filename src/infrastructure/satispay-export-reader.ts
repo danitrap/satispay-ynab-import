@@ -14,6 +14,7 @@ import type {
   SatispayMovementKind,
 } from "../domain/satispay-movement.ts";
 import type { SheetCell } from "../spreadsheet.ts";
+import type { WorkbookError } from "../errors.ts";
 import { WorkbookReader } from "../workbook-reader.ts";
 import { Effect, Layer } from "effect";
 
@@ -164,20 +165,16 @@ export function parseSatispayExport(rows: readonly (readonly SheetCell[])[]): Pa
   };
 }
 
-export const satispayExportReaderLayer = Layer.effect(
-  SatispayExportReader,
-  Effect.gen(function* () {
-    const workbook = yield* WorkbookReader;
-    return {
-      read: (file) =>
-        workbook.read(file).pipe(
-          Effect.flatMap((rows) => {
-            const parsed = parseSatispayExport(rows);
-            return parsed._tag === "HeaderError"
-              ? Effect.fail(new SatispayExportHeaderError({ reason: parsed.reason }))
-              : Effect.succeed(parsed.satispayExport);
-          }),
-        ),
-    };
-  }),
-);
+export const satispayExportReaderLayer = Layer.succeed(SatispayExportReader, {
+  // Resolve the workbook reader when the export is read, so a request can inject one.
+  read: (file) =>
+    Effect.gen(function* () {
+      const workbook = yield* WorkbookReader;
+      const rows = yield* workbook.read(file);
+      const parsed = parseSatispayExport(rows);
+      if (parsed._tag === "HeaderError") {
+        return yield* new SatispayExportHeaderError({ reason: parsed.reason });
+      }
+      return parsed.satispayExport;
+    }) as Effect.Effect<SatispayExportRead, SatispayExportHeaderError | WorkbookError>,
+});

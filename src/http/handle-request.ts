@@ -1,11 +1,11 @@
 import { AppConfig } from "../application/app-config.ts";
+import { reportedImportCounts, type ImportFailure } from "../application/import-prepared.ts";
+import { listYnabAccounts } from "../application/list-ynab-accounts.ts";
 import { authorizeEffect } from "../auth.ts";
 import { decodeCsv, parseCsv } from "../csv.ts";
-import type { YnabFailure } from "../errors.ts";
 import { processImportEffect } from "../import-handler.ts";
 import { inspectXlsxEffect, previewXlsxEffect } from "../spreadsheet.ts";
 import { observeOperation } from "../telemetry.ts";
-import { findAccountsEffect } from "../ynab-service.ts";
 import { Data, Effect, Stream } from "effect";
 
 const MAX_FILE_BYTES = 4_000_000;
@@ -33,21 +33,19 @@ const json = (body: unknown, status = 200) =>
 const isImportRequest = (request: Request) =>
   ["/prepare", "/import"].includes(new URL(request.url).pathname);
 
-function ynabFailureStatus(error: YnabFailure): number {
+function importFailureStatus(error: ImportFailure): number {
   switch (error._tag) {
     case "ConfigurationError":
       return 409;
-    case "YnabWriteDisabledError":
+    case "ImportWritesDisabledError":
       return 403;
-    case "YnabAccountError":
-    case "YnabImportRejectedError":
+    case "ImportTargetAccountError":
+    case "ImportCandidateLimitError":
       return 422;
     default:
       return 502;
   }
 }
-const ynabFailureResponse = (error: YnabFailure) =>
-  Effect.succeed(json({ ok: false, error: error.message }, ynabFailureStatus(error)));
 
 /** Bounded upload reads: also protect requests without Content-Length. */
 const readRequestBodyEffect = Effect.fn("satispay.upload")(
@@ -144,7 +142,7 @@ export const handleRequestEffect = Effect.fnUntraced(
     }
     if (decision._tag === "Unauthorized") return json({ ok: false, error: "Unauthorized" }, 401);
     if (listAccounts) {
-      const accounts = yield* findAccountsEffect;
+      const accounts = yield* listYnabAccounts;
       return json({ ok: true, ...accounts });
     }
     if (url.pathname === "/import" && request.headers.get("X-Confirm-Import") !== "yes") {
@@ -205,12 +203,13 @@ export const handleRequestEffect = Effect.fnUntraced(
             message: "No transactions have been sent to YNAB",
           });
         }
+        const counts = reportedImportCounts(result.outcome);
         return json({
           ok: true,
           mode: "import-completed",
           ...result.summary,
-          ...result.result,
-          imported: result.result.processed,
+          ...counts,
+          imported: counts.processed,
           message:
             "YNAB processed the batch (new or matched transactions). Review and reconcile Satispay in YNAB.",
         });
@@ -289,24 +288,25 @@ export const handleRequestEffect = Effect.fnUntraced(
           ),
         PreparedImportError: (error) =>
           Effect.succeed(json({ ok: false, error: error.message, imported: 0 }, 422)),
-        ImportFailedError: (error) =>
-          Effect.succeed(
+        ImportFailedError: (error) => {
+          const progress =
+            error.reason._tag === "ImportBatchError" || error.reason._tag === "ImportIdentityError"
+              ? reportedImportCounts(error.reason.outcome)
+              : undefined;
+          return Effect.succeed(
             json(
               {
                 ok: false,
                 mode: "import-failed",
                 ...error.summary,
-                ...(error.reason._tag === "YnabImportBatchError"
-                  ? { ...error.reason.progress, imported: error.reason.progress.processed }
-                  : { imported: 0 }),
+                ...(progress ? { ...progress, imported: progress.processed } : { imported: 0 }),
                 error: error.message,
               },
-              ynabFailureStatus(error.reason),
+              importFailureStatus(error.reason),
             ),
-          ),
-        YnabTransportError: ynabFailureResponse,
-        YnabHttpError: ynabFailureResponse,
-        YnabResponseError: ynabFailureResponse,
+          );
+        },
+        YnabGatewayError: (error) => Effect.succeed(json({ ok: false, error: error.message }, 502)),
       }),
     ),
 );

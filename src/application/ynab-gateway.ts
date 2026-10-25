@@ -7,7 +7,8 @@ import { Context, Data, type Effect } from "effect";
  * operations; write gating, batching and target-account rules stay in the import use case.
  */
 
-export type YnabGatewayOperation = "listAccounts" | "readAccount" | "createImportBatch";
+export type YnabGatewayOperation =
+  "listAccounts" | "listPlans" | "readAccount" | "createImportBatch";
 
 export type YnabGatewayFailureReason =
   | { readonly _tag: "Network" }
@@ -33,9 +34,9 @@ export class YnabGatewayError extends Data.TaggedError("YnabGatewayError")<{
       case "Response":
         return "YNAB returned unexpected JSON.";
       case "Contract":
-        return this.operation === "listAccounts"
-          ? "Cannot list YNAB accounts"
-          : "Unexpected YNAB response: verify results in YNAB before retrying";
+        if (this.operation === "listAccounts") return "Cannot list YNAB accounts";
+        if (this.operation === "listPlans") return "Cannot list YNAB plans";
+        return "Unexpected YNAB response: verify results in YNAB before retrying";
       case "Encode":
         return "Cannot encode YNAB request";
     }

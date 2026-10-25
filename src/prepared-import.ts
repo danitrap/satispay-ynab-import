@@ -1,5 +1,9 @@
 import type { SatispayExportHeaderReason } from "./application/satispay-export-reader.ts";
 import {
+  summarizePreparedImport,
+  type PreparedImportSummary,
+} from "./application/prepare-import.ts";
+import {
   calendarDate,
   satispayTransactionId,
   type CalendarDate,
@@ -12,6 +16,8 @@ import { prepareImport, type PreparedImport } from "./domain/prepared-import.ts"
 import type { SatispayMovement } from "./domain/satispay-movement.ts";
 import { parseSatispayExport } from "./infrastructure/satispay-export-reader.ts";
 import type { SheetCell } from "./spreadsheet.ts";
+
+export type { PreparedImportSummary };
 
 /**
  * Turns one Satispay export into a prepared import and the YNAB candidates selected from it.
@@ -39,26 +45,6 @@ export type YnabImportCandidate = {
   readonly memo: string;
   readonly type: string;
   readonly reviewReason?: AmbiguityReason;
-};
-
-export type PreparedImportSummary = {
-  readonly exported: number;
-  readonly olderThanStart: number;
-  readonly withoutAvailability: number;
-  readonly rejected: number;
-  readonly provisional: number;
-  readonly inScope: number;
-  readonly issues: Readonly<Record<string, number>>;
-  readonly reviewIssues: Readonly<Record<string, number>>;
-  readonly requiresReview: number;
-  readonly fromDate: CalendarDate;
-  readonly inflowMilliunits: Milliunits;
-  readonly outflowMilliunits: Milliunits;
-  readonly netMilliunits: Milliunits;
-  readonly refundsAdjusted: number;
-  readonly refundsUnresolved: number;
-  readonly balanceCheck: WalletBalanceCheck;
-  readonly eligible: number;
 };
 
 export type BuiltPreparedImport = {
@@ -137,29 +123,13 @@ export function buildPreparedImport(
   const parsed = parseSatispayExport(rows);
   if (parsed._tag === "HeaderError") throw new PreparedImportInputError(inputReason(parsed.reason));
   const preparedImport = prepareImport(parsed.satispayExport, importCutoff);
-  if (preparedImport.totals._tag === "Overflow")
-    throw new PreparedImportInputError("AmountOverflow");
   const totals = preparedImport.totals;
+  if (totals._tag === "Overflow") throw new PreparedImportInputError("AmountOverflow");
+  const summary = summarizePreparedImport(preparedImport, totals);
   const candidates: YnabImportCandidate[] = [];
-  const issues: Record<string, number> = {};
-  const reviewIssues: Record<string, number> = {};
-  let olderThanStart = 0;
-  let withoutAvailability = 0;
-  let rejected = 0;
-  let provisional = 0;
   for (const classified of preparedImport.movements) {
     switch (classified._tag) {
-      case "SkippedMovement":
-        if (classified.reason === "outside_import_period") olderThanStart++;
-        else withoutAvailability++;
-        break;
-      case "RejectedMovement":
-        rejected++;
-        issues[classified.reason] = (issues[classified.reason] ?? 0) + 1;
-        break;
       case "ProvisionalTransaction":
-        provisional++;
-        reviewIssues[classified.reason] = (reviewIssues[classified.reason] ?? 0) + 1;
         candidates.push(
           candidateFrom(classified.movement, classified.amountMilliunits, classified.reason),
         );
@@ -167,47 +137,35 @@ export function buildPreparedImport(
       case "ImportCandidate":
         candidates.push(candidateFrom(classified.movement, classified.amountMilliunits));
         break;
+      case "SkippedMovement":
+      case "RejectedMovement":
+        break;
     }
   }
   candidates.sort(
     (left, right) =>
       left.date.localeCompare(right.date) || left.satispayId.localeCompare(right.satispayId),
   );
-  const counts = {
-    exported: preparedImport.movements.length,
-    olderThanStart,
-    withoutAvailability,
-    rejected,
-    provisional,
-    inScope: candidates.length,
-  };
-  const summary: PreparedImportSummary = {
-    ...counts,
-    issues,
-    reviewIssues,
-    requiresReview: rejected + provisional,
-    fromDate: importCutoff,
-    inflowMilliunits: totals.inflowMilliunits,
-    outflowMilliunits: totals.outflowMilliunits,
-    netMilliunits: totals.netMilliunits,
-    refundsAdjusted: preparedImport.refundsAdjusted,
-    refundsUnresolved: preparedImport.refundsUnresolved,
-    balanceCheck: preparedImport.balanceCheck,
-    eligible: candidates.length,
-  };
   return {
     preparedImport,
     candidates,
-    counts,
-    issues,
-    reviewIssues,
-    fromDate: importCutoff,
-    inflowMilliunits: totals.inflowMilliunits,
-    outflowMilliunits: totals.outflowMilliunits,
-    netMilliunits: totals.netMilliunits,
-    refundsAdjusted: preparedImport.refundsAdjusted,
-    refundsUnresolved: preparedImport.refundsUnresolved,
-    balanceCheck: preparedImport.balanceCheck,
+    counts: {
+      exported: summary.exported,
+      olderThanStart: summary.olderThanStart,
+      withoutAvailability: summary.withoutAvailability,
+      rejected: summary.rejected,
+      provisional: summary.provisional,
+      inScope: summary.inScope,
+    },
+    issues: summary.issues,
+    reviewIssues: summary.reviewIssues,
+    fromDate: summary.fromDate,
+    inflowMilliunits: summary.inflowMilliunits,
+    outflowMilliunits: summary.outflowMilliunits,
+    netMilliunits: summary.netMilliunits,
+    refundsAdjusted: summary.refundsAdjusted,
+    refundsUnresolved: summary.refundsUnresolved,
+    balanceCheck: summary.balanceCheck,
     summary,
   };
 }

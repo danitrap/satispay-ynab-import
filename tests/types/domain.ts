@@ -7,7 +7,28 @@ import {
 } from "../../src/domain.ts";
 import { Schema } from "effect";
 import { YnabAccountIdSchema, YnabPlanIdSchema } from "../../src/domain-schema.ts";
-import { buildYnabTransactionsEffect } from "../../src/ynab.ts";
+import { toYnabTransaction } from "../../src/application/ynab-transaction.ts";
+import type { ImportCandidate } from "../../src/domain/movement-classification.ts";
+
+const candidate = {
+  _tag: "ImportCandidate",
+  amountMilliunits: -1000,
+  walletAmount: -100,
+  movement: {
+    satispayMovementIdentifier: { _tag: "Unique", value: "synthetic" },
+    date: { _tag: "Valid", calendarDate: "2026-10-18", instantMs: 0 },
+    nominalAmount: { _tag: "Absent" },
+    reportedWalletAmount: { _tag: "Amount", cents: -100 },
+    mealVoucherAmount: { _tag: "Absent" },
+    flexBenefitAmount: { _tag: "Absent" },
+    walletBalance: { _tag: "Absent" },
+    satispayApproval: "approved",
+    kind: "other",
+    typeLabel: "Altro",
+    name: "Shop",
+    description: "",
+  },
+} as ImportCandidate;
 
 export function checkMoneyTypes(cents: Cents, milliunits: Milliunits) {
   centsToMilliunits(cents);
@@ -20,7 +41,7 @@ export function checkMoneyTypes(cents: Cents, milliunits: Milliunits) {
 export function checkIdentifiers() {
   const account = Schema.decodeUnknownSync(YnabAccountIdSchema)("wallet");
   const plan = Schema.decodeUnknownSync(YnabPlanIdSchema)("plan");
-  buildYnabTransactionsEffect([], account);
+  toYnabTransaction(candidate, account);
   // @ts-expect-error A plan identifier cannot be used as a destination account.
-  buildYnabTransactionsEffect([], plan);
+  toYnabTransaction(candidate, plan);
 }

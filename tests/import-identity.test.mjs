@@ -7,7 +7,7 @@ import { buildPreparedImport } from "../src/prepared-import.ts";
 import { handleRequestEffect } from "../src/index.ts";
 import { appConfigLayer } from "../src/infrastructure/app-config.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import { importIdEffect } from "../src/ynab.ts";
+import { importIdentity } from "../src/application/ynab-transaction.ts";
 import { WorkbookReader } from "../src/workbook-reader.ts";
 
 // Pinned import identities for these synthetic Satispay movement identifiers.
@@ -153,7 +153,7 @@ test("an import keeps today's import identity for purchases, refunds, top-ups an
 test("the exported import identity is the pinned SPS value of the Satispay movement identifier", async () => {
   for (const expected of IMPORT_IDENTITIES) {
     assert.equal(
-      await Effect.runPromise(importIdEffect(expected.movementId)),
+      await Effect.runPromise(importIdentity(expected.movementId)),
       expected.importId,
       expected.movementId,
     );

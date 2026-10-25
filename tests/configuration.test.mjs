@@ -4,7 +4,7 @@ import worker from "../src/index.ts";
 import { Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import { findAccountsEffect } from "../src/ynab-service.ts";
+import { listYnabAccounts } from "../src/application/list-ynab-accounts.ts";
 
 test("account discovery reports missing configuration without exposing bindings", async () => {
   const response = await worker.fetch(
@@ -41,7 +41,7 @@ test("health and CSV inspection ignore unrelated invalid YNAB configuration", as
 test("invalid secrets never appear in typed configuration failures or HTTP responses", async () => {
   const env = { UPLOAD_TOKEN: "upload-secret", YNAB_TOKEN: " secret-with-invalid-whitespace " };
   const error = await Effect.runPromise(
-    findAccountsEffect.pipe(Effect.provide(requestLiveLayer(env)), Effect.flip),
+    listYnabAccounts.pipe(Effect.provide(requestLiveLayer(env)), Effect.flip),
   );
   assert.equal(error._tag, "ConfigurationError");
   assert.equal(error.key, "YNAB_TOKEN");
@@ -66,7 +66,7 @@ test("concurrent requests use only their own YNAB credentials", async () => {
   await Promise.all(
     ["first-secret", "second-secret"].map((token) =>
       Effect.runPromise(
-        findAccountsEffect.pipe(Effect.provide(requestLiveLayer({ YNAB_TOKEN: token }, fetchFn))),
+        listYnabAccounts.pipe(Effect.provide(requestLiveLayer({ YNAB_TOKEN: token }, fetchFn))),
       ),
     ),
   );

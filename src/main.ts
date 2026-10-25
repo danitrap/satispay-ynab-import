@@ -5,7 +5,6 @@ import { satispayExportReaderLayer } from "./infrastructure/satispay-export-read
 import { ynabGatewayLayer } from "./infrastructure/ynab-gateway.ts";
 import { operationLogger } from "./telemetry.ts";
 import { workbookReaderLayer } from "./workbook-reader.ts";
-import { ynabHttpLayer } from "./ynab-service.ts";
 import { Effect, Layer, Logger } from "effect";
 import { FetchHttpClient } from "effect/http";
 
@@ -16,7 +15,6 @@ export const requestLiveLayer = (env: WorkerEnv, fetchFn: typeof fetch = fetch) 
     Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchFn)),
   );
   return Layer.mergeAll(
-    ynabHttpLayer.pipe(Layer.provideMerge(config), Layer.provide(transport)),
     ynabGatewayLayer.pipe(Layer.provideMerge(config), Layer.provide(transport)),
     workbookReaderLayer,
     satispayExportReaderLayer.pipe(Layer.provide(workbookReaderLayer)),
