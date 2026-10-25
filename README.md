@@ -454,6 +454,24 @@ npm run dev             # Local Worker
 
 The tests use Node's built-in test runner. They cover wallet-only funding, mixed refunds, duplicate IDs, eligibility filters, YNAB result handling, HTTP failures, and Effect service Layers.
 
+### Local development
+
+`npm test` does not call YNAB and does not read Worker Secrets. It injects synthetic movements and in-memory services. `npm run dev` runs `wrangler dev` on `http://localhost:8787`. It loads `[vars]` from the tracked `wrangler.toml`, then applies the Git-ignored `.dev.vars`. A name in `.dev.vars` overrides the same name in `[vars]`.
+
+The settings the Worker reads are listed in [Quick start](#quick-start-from-fork-to-first-preview). In this checkout, copy the secrets template and keep writes off for local runs:
+
+~~~bash
+cp .dev.vars.example .dev.vars
+npm test
+npm run dev
+~~~
+
+Add `YNAB_WRITE_ENABLED="false"` to `.dev.vars` before `npm run dev`. The tracked `wrangler.toml` enables writes. Under `wrangler dev`, the `.dev.vars` value overrides that `[vars]` entry, so a local `/import` does not write to the YNAB plan.
+
+Do not copy `wrangler.example.toml` over `wrangler.toml` here. That file is the tracked deploy configuration. A fork replaces it with its own copy (`cp wrangler.example.toml wrangler.toml`), as [Contributing](CONTRIBUTING.md#set-up-your-fork) describes.
+
+`npm run check:bundle` dry-runs the Wrangler bundle and does not deploy.
+
 GitHub Actions runs the test suite, TypeScript checks, and Wrangler bundle checks on pull requests and pushes to `main`.
 
 ### Local Effect source reference
