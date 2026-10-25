@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { analyzeLedger } from "../src/ledger.ts";
-import { buildImportPlan } from "../src/import-plan.ts";
+import { classifyMovements } from "../src/domain/movement-classification.ts";
+import { parseSatispayExport } from "../src/infrastructure/satispay-export-reader.ts";
+import { buildPreparedImport } from "../src/prepared-import.ts";
 import { previewSatispay } from "../src/preview.ts";
 
 const headers = [
@@ -32,6 +33,26 @@ const row = (d, name, nominal, type, available, meal, balance, id, flex = null) 
   balance,
   id,
 ];
+const readExport = (rows) => {
+  const parsed = parseSatispayExport(rows);
+  assert.equal(parsed._tag, "Export");
+  return parsed.satispayExport;
+};
+const classified = (rows) => classifyMovements(readExport(rows));
+const byId = (rows, id) => {
+  const found = classified(rows).movements.find((item) => {
+    const identifier = item.movement.satispayMovementIdentifier;
+    return "value" in identifier && identifier.value === id;
+  });
+  assert.ok(found, id);
+  return found;
+};
+const walletCents = (item) =>
+  item._tag === "ImportCandidate"
+    ? item.walletAmount
+    : item._tag === "ProvisionalTransaction"
+      ? item.provisionalWalletAmount
+      : 0;
 
 const sample = [
   headers,
@@ -43,22 +64,22 @@ const sample = [
   row(date(18), "Shop", -5, "🏬 a un Negozio", -5, null, 100, "old"),
 ];
 test("mixed meal-voucher refunds match original purchase and only restore wallet amount", () => {
-  const audit = analyzeLedger(sample);
+  const audit = classified(sample);
   assert.equal(audit.refundsAdjusted, 2);
   assert.equal(audit.refundsUnresolved, 0);
-  assert.equal(audit.resolved[0].amountCents, 423);
-  assert.equal(audit.resolved[2].amountCents, 300);
+  assert.equal(walletCents(byId(sample, "refund-a")), 423);
+  assert.equal(walletCents(byId(sample, "refund-b")), 300);
   assert.deepEqual(audit.balanceCheck, {
     status: "ok",
     expectedChangeMilliunits: 100000,
     calculatedChangeMilliunits: 100000,
     discrepancyMilliunits: 0,
   });
-  const plan = buildImportPlan(sample, "2026-08-18");
-  assert.equal(plan.candidates.find((x) => x.satispayId === "refund-a").amountMilliunits, 4230);
-  assert.equal(plan.candidates.find((x) => x.satispayId === "refund-b").amountMilliunits, 3000);
-  assert.equal(plan.refundsAdjusted, 2);
-  assert.equal(plan.balanceCheck.status, "ok");
+  const prepared = buildPreparedImport(sample, "2026-08-18");
+  assert.equal(prepared.candidates.find((x) => x.satispayId === "refund-a").amountMilliunits, 4230);
+  assert.equal(prepared.candidates.find((x) => x.satispayId === "refund-b").amountMilliunits, 3000);
+  assert.equal(prepared.refundsAdjusted, 2);
+  assert.equal(prepared.balanceCheck.status, "ok");
   const preview = previewSatispay(sample);
   assert.equal(preview.refundsAdjusted, 2);
   assert.equal(preview.balanceCheck.discrepancyMilliunits, 0);
@@ -66,16 +87,17 @@ test("mixed meal-voucher refunds match original purchase and only restore wallet
 });
 test("missing merchant original imports the reported refund provisionally", () => {
   const data = [headers, row(date(28), "Cafe", 20.23, "🔄 Rimborso", 20.23, null, 100, "refund")];
-  const audit = analyzeLedger(data);
-  assert.equal(audit.refundsUnresolved, 1);
-  assert.equal(audit.resolved[0].reviewReason, "refund_purchase_not_in_export");
-  assert.equal(audit.resolved[0].amountCents, 2023);
+  const refund = byId(data, "refund");
+  assert.equal(classified(data).refundsUnresolved, 1);
+  assert.equal(refund._tag, "ProvisionalTransaction");
+  assert.equal(refund.reason, "refund_purchase_not_in_export");
+  assert.equal(refund.provisionalWalletAmount, 2023);
   const preview = previewSatispay(data);
   assert.equal(preview.requiresReview, 1);
-  const plan = buildImportPlan(data, "2026-08-01");
-  assert.equal(plan.counts.rejected, 0);
-  assert.equal(plan.counts.provisional, 1);
-  assert.equal(plan.candidates.length, 1);
+  const prepared = buildPreparedImport(data, "2026-08-01");
+  assert.equal(prepared.counts.rejected, 0);
+  assert.equal(prepared.counts.provisional, 1);
+  assert.equal(prepared.candidates.length, 1);
   assert.equal(preview.eligible, 1);
   assert.equal(preview.provisional, 1);
   assert.equal(preview.inflowMilliunits, 20230);
@@ -87,9 +109,10 @@ test("ambiguous same-merchant equal-amount purchases are not guessed", () => {
     row(date(28, 11), "Cafe", -20.23, "🏬 a un Negozio", -4.23, -16, 195.77, "purchase-1"),
     row(date(27), "Cafe", -20.23, "🏬 a un Negozio", -12.23, -8, 200, "purchase-2"),
   ];
-  const r = analyzeLedger(rows);
-  assert.equal(r.resolved[0].reviewReason, "ambiguous_refund_purchase");
-  assert.equal(r.resolved[0].amountCents, 2023);
+  const refund = byId(rows, "refund");
+  assert.equal(refund._tag, "ProvisionalTransaction");
+  assert.equal(refund.reason, "ambiguous_refund_purchase");
+  assert.equal(refund.provisionalWalletAmount, 2023);
 });
 test("inconsistent funding and unverifiable nominal amounts retain a provisional wallet amount", () => {
   for (const [nominal, benefit, reason] of [
@@ -101,14 +124,14 @@ test("inconsistent funding and unverifiable nominal amounts retain a provisional
       row(date(28), "Cafe", nominal, "🔄 Rimborso", 20, null, 120, "refund"),
       row(date(27), "Cafe", -20, "🏬 a un Negozio", -4, benefit, 100, "purchase"),
     ];
-    const plan = buildImportPlan(rows, "2026-08-01");
-    const refund = plan.candidates.find((candidate) => candidate.satispayId === "refund");
+    const prepared = buildPreparedImport(rows, "2026-08-01");
+    const refund = prepared.candidates.find((candidate) => candidate.satispayId === "refund");
     assert.equal(refund.amountMilliunits, 20000);
     assert.equal(refund.reviewReason, reason);
-    assert.equal(plan.counts.provisional, 1);
-    assert.equal(plan.counts.rejected, 0);
+    assert.equal(prepared.counts.provisional, 1);
+    assert.equal(prepared.counts.rejected, 0);
     // Provisional values must not make the balance audit look verified.
-    assert.equal(plan.balanceCheck.status, "unavailable");
+    assert.equal(prepared.balanceCheck.status, "unavailable");
     assert.equal(previewSatispay(rows).requiresReview, 1);
   }
 });
@@ -126,9 +149,10 @@ test("indexed refund matching retains inclusive 90-day boundaries and merchant n
       row(new Date(refundTime), "Cafe A", 20, "🔄 Rimborso", 20, null, 100, "refund"),
       row(new Date(purchaseTime), "  CAFE   A ", -20, "🏬 a un Negozio", -4, -16, 96, "purchase"),
     ];
-    const resolution = analyzeLedger(rows).resolved[0];
-    assert.equal(resolution.reviewReason, reviewReason);
-    assert.equal(resolution.amountCents, reviewReason ? 2000 : 400);
+    const refund = byId(rows, "refund");
+    const actualReason = refund._tag === "ProvisionalTransaction" ? refund.reason : undefined;
+    assert.equal(actualReason, reviewReason);
+    assert.equal(walletCents(refund), reviewReason ? 2000 : 400);
   }
 });
 test("a 10,000-row export with repeated merchant amounts retains every ambiguous refund for review", () => {
@@ -137,11 +161,11 @@ test("a 10,000-row export with repeated merchant amounts retains every ambiguous
     rows.push(row(date(28), "Cafe", 20, "🔄 Rimborso", 20, null, null, `refund-${index}`));
     rows.push(row(date(27), "Cafe", -20, "🏬 a un Negozio", -4, -16, null, `purchase-${index}`));
   }
-  const plan = buildImportPlan(rows, "2026-08-01");
-  assert.equal(plan.candidates.length, 10_000);
-  assert.equal(plan.counts.provisional, 5000);
-  assert.equal(plan.reviewIssues.ambiguous_refund_purchase, 5000);
-  assert.equal(plan.counts.rejected, 0);
+  const prepared = buildPreparedImport(rows, "2026-08-01");
+  assert.equal(prepared.candidates.length, 10_000);
+  assert.equal(prepared.counts.provisional, 5000);
+  assert.equal(prepared.reviewIssues.ambiguous_refund_purchase, 5000);
+  assert.equal(prepared.counts.rejected, 0);
 });
 test("a full voucher refund leads to a zero wallet amount and is skipped", () => {
   const rows = [
@@ -149,11 +173,11 @@ test("a full voucher refund leads to a zero wallet amount and is skipped", () =>
     row(date(28), "Cafe", 16, "🔄 Rimborso", 16, null, 100, "refund"),
     row(date(27), "Cafe", -16, "🏬 a un Negozio", null, -16, 100, "original"),
   ];
-  const audit = analyzeLedger(rows);
-  assert.equal(audit.resolved[0].amountCents, 0);
-  const plan = buildImportPlan(rows, "2026-08-01");
-  assert.equal(plan.candidates.length, 0);
-  assert.equal(plan.counts.withoutAvailability, 2);
+  assert.equal(byId(rows, "refund")._tag, "SkippedMovement");
+  assert.equal(walletCents(byId(rows, "refund")), 0);
+  const prepared = buildPreparedImport(rows, "2026-08-01");
+  assert.equal(prepared.candidates.length, 0);
+  assert.equal(prepared.counts.withoutAvailability, 2);
 });
 test("two refunds, one purchase: the later refund stays provisional", () => {
   const rows = [
@@ -162,24 +186,28 @@ test("two refunds, one purchase: the later refund stays provisional", () => {
     row(date(27), "Cafe", 20, "🔄 Rimborso", 20, null, 120, "refund-earlier"),
     row(date(26), "Cafe", -20, "🏬 a un Negozio", -20, null, 100, "purchase"),
   ];
-  const audit = analyzeLedger(rows);
-  assert.equal(audit.resolved[1].reviewReason, undefined);
-  assert.equal(audit.resolved[1].amountCents, 2000);
-  assert.equal(audit.resolved[0].reviewReason, "refund_exceeds_remaining_amount");
-  assert.equal(audit.resolved[0].amountCents, 2000);
+  const audit = classified(rows);
+  assert.equal(byId(rows, "refund-earlier")._tag, "ImportCandidate");
+  assert.equal(walletCents(byId(rows, "refund-earlier")), 2000);
+  const laterRefund = byId(rows, "refund-later");
+  assert.equal(laterRefund._tag, "ProvisionalTransaction");
+  assert.equal(laterRefund.reason, "refund_exceeds_remaining_amount");
+  assert.equal(laterRefund.provisionalWalletAmount, 2000);
   assert.equal(audit.refundsUnresolved, 1);
   assert.equal(audit.refundsAdjusted, 0);
-  const plan = buildImportPlan(rows, "2026-08-01");
-  assert.equal(plan.counts.provisional, 1);
-  assert.equal(plan.reviewIssues.refund_exceeds_remaining_amount, 1);
-  const earlier = plan.candidates.find((candidate) => candidate.satispayId === "refund-earlier");
-  const later = plan.candidates.find((candidate) => candidate.satispayId === "refund-later");
+  const prepared = buildPreparedImport(rows, "2026-08-01");
+  assert.equal(prepared.counts.provisional, 1);
+  assert.equal(prepared.reviewIssues.refund_exceeds_remaining_amount, 1);
+  const earlier = prepared.candidates.find(
+    (candidate) => candidate.satispayId === "refund-earlier",
+  );
+  const later = prepared.candidates.find((candidate) => candidate.satispayId === "refund-later");
   assert.equal(earlier.amountMilliunits, 20000);
   assert.equal(earlier.reviewReason, undefined);
   assert.equal(later.amountMilliunits, 20000);
   assert.equal(later.reviewReason, "refund_exceeds_remaining_amount");
   assert.match(later.memo, /remaining wallet amount/);
-  assert.equal(plan.balanceCheck.status, "unavailable");
+  assert.equal(prepared.balanceCheck.status, "unavailable");
 });
 test("a partial refund of a wallet-funded purchase matches", () => {
   const rows = [
@@ -187,15 +215,15 @@ test("a partial refund of a wallet-funded purchase matches", () => {
     row(date(28), "Cafe", 5, "🔄 Rimborso", 5, null, 105, "refund"),
     row(date(27), "Cafe", -20, "🏬 a un Negozio", -20, null, 100, "purchase"),
   ];
-  const audit = analyzeLedger(rows);
+  const audit = classified(rows);
   assert.equal(audit.refundsUnresolved, 0);
   assert.equal(audit.refundsAdjusted, 0);
-  assert.equal(audit.resolved[0].reviewReason, undefined);
-  assert.equal(audit.resolved[0].amountCents, 500);
-  const plan = buildImportPlan(rows, "2026-08-01");
-  assert.equal(plan.counts.provisional, 0);
+  assert.equal(byId(rows, "refund")._tag, "ImportCandidate");
+  assert.equal(walletCents(byId(rows, "refund")), 500);
+  const prepared = buildPreparedImport(rows, "2026-08-01");
+  assert.equal(prepared.counts.provisional, 0);
   assert.equal(
-    plan.candidates.find((candidate) => candidate.satispayId === "refund").amountMilliunits,
+    prepared.candidates.find((candidate) => candidate.satispayId === "refund").amountMilliunits,
     5000,
   );
 });
@@ -206,20 +234,20 @@ test("multiple partial refunds summing to the purchase all match", () => {
     row(date(27), "Cafe", 8, "🔄 Rimborso", 8, null, 108, "refund-a"),
     row(date(26), "Cafe", -20, "🏬 a un Negozio", -20, null, 100, "purchase"),
   ];
-  const audit = analyzeLedger(rows);
+  const audit = classified(rows);
   assert.equal(audit.refundsUnresolved, 0);
-  assert.equal(audit.resolved[0].amountCents, 1200);
-  assert.equal(audit.resolved[0].reviewReason, undefined);
-  assert.equal(audit.resolved[1].amountCents, 800);
-  assert.equal(audit.resolved[1].reviewReason, undefined);
-  const plan = buildImportPlan(rows, "2026-08-01");
-  assert.equal(plan.counts.provisional, 0);
+  assert.equal(byId(rows, "refund-b")._tag, "ImportCandidate");
+  assert.equal(walletCents(byId(rows, "refund-b")), 1200);
+  assert.equal(byId(rows, "refund-a")._tag, "ImportCandidate");
+  assert.equal(walletCents(byId(rows, "refund-a")), 800);
+  const prepared = buildPreparedImport(rows, "2026-08-01");
+  assert.equal(prepared.counts.provisional, 0);
   assert.equal(
-    plan.candidates.find((candidate) => candidate.satispayId === "refund-a").amountMilliunits,
+    prepared.candidates.find((candidate) => candidate.satispayId === "refund-a").amountMilliunits,
     8000,
   );
   assert.equal(
-    plan.candidates.find((candidate) => candidate.satispayId === "refund-b").amountMilliunits,
+    prepared.candidates.find((candidate) => candidate.satispayId === "refund-b").amountMilliunits,
     12000,
   );
 });
@@ -230,20 +258,22 @@ test("a refund exceeding the remaining wallet amount stays provisional", () => {
     row(date(27), "Cafe", 15, "🔄 Rimborso", 15, null, 115, "refund-fit"),
     row(date(26), "Cafe", -20, "🏬 a un Negozio", -20, null, 100, "purchase"),
   ];
-  const audit = analyzeLedger(rows);
-  assert.equal(audit.resolved[1].reviewReason, undefined);
-  assert.equal(audit.resolved[1].amountCents, 1500);
-  assert.equal(audit.resolved[0].reviewReason, "refund_exceeds_remaining_amount");
-  assert.equal(audit.resolved[0].amountCents, 1000);
+  const audit = classified(rows);
+  assert.equal(byId(rows, "refund-fit")._tag, "ImportCandidate");
+  assert.equal(walletCents(byId(rows, "refund-fit")), 1500);
+  const over = byId(rows, "refund-over");
+  assert.equal(over._tag, "ProvisionalTransaction");
+  assert.equal(over.reason, "refund_exceeds_remaining_amount");
+  assert.equal(over.provisionalWalletAmount, 1000);
   assert.equal(audit.refundsUnresolved, 1);
-  const plan = buildImportPlan(rows, "2026-08-01");
-  assert.equal(plan.counts.provisional, 1);
+  const prepared = buildPreparedImport(rows, "2026-08-01");
+  assert.equal(prepared.counts.provisional, 1);
   assert.equal(
-    plan.candidates.find((candidate) => candidate.satispayId === "refund-fit").amountMilliunits,
+    prepared.candidates.find((candidate) => candidate.satispayId === "refund-fit").amountMilliunits,
     15000,
   );
   assert.equal(
-    plan.candidates.find((candidate) => candidate.satispayId === "refund-over").reviewReason,
+    prepared.candidates.find((candidate) => candidate.satispayId === "refund-over").reviewReason,
     "refund_exceeds_remaining_amount",
   );
 });
@@ -254,12 +284,13 @@ test("a second full refund does not reuse a mixed purchase", () => {
     row(date(27), "Cafe", 20.23, "🔄 Rimborso", 20.23, null, 195.77, "refund-earlier"),
     row(date(26), "Cafe", -20.23, "🏬 a un Negozio", -4.23, -16, 191.54, "purchase"),
   ];
-  const audit = analyzeLedger(rows);
-  assert.equal(audit.resolved[1].amountCents, 423);
-  assert.equal(audit.resolved[1].adjusted, true);
-  assert.equal(audit.resolved[1].reviewReason, undefined);
-  assert.equal(audit.resolved[0].reviewReason, "refund_exceeds_remaining_amount");
-  assert.equal(audit.resolved[0].amountCents, 2023);
+  const audit = classified(rows);
+  assert.equal(byId(rows, "refund-earlier")._tag, "ImportCandidate");
+  assert.equal(walletCents(byId(rows, "refund-earlier")), 423);
+  const laterRefund = byId(rows, "refund-later");
+  assert.equal(laterRefund._tag, "ProvisionalTransaction");
+  assert.equal(laterRefund.reason, "refund_exceeds_remaining_amount");
+  assert.equal(laterRefund.provisionalWalletAmount, 2023);
   assert.equal(audit.refundsAdjusted, 1);
   assert.equal(audit.refundsUnresolved, 1);
 });
@@ -270,19 +301,21 @@ test("a partial refund of a mixed purchase stays provisional and does not consum
     row(date(27), "Cafe", 5, "🔄 Rimborso", 5, null, 105, "refund-partial"),
     row(date(26), "Cafe", -20, "🏬 a un Negozio", -4, -16, 100, "purchase"),
   ];
-  const audit = analyzeLedger(rows);
-  assert.equal(audit.resolved[1].reviewReason, "partial_refund_split_unknown");
-  assert.equal(audit.resolved[1].amountCents, 500);
-  assert.equal(audit.resolved[0].reviewReason, undefined);
-  assert.equal(audit.resolved[0].amountCents, 400);
-  const plan = buildImportPlan(rows, "2026-08-01");
-  assert.equal(plan.counts.provisional, 1);
+  const partial = byId(rows, "refund-partial");
+  assert.equal(partial._tag, "ProvisionalTransaction");
+  assert.equal(partial.reason, "partial_refund_split_unknown");
+  assert.equal(partial.provisionalWalletAmount, 500);
+  assert.equal(byId(rows, "refund-full")._tag, "ImportCandidate");
+  assert.equal(walletCents(byId(rows, "refund-full")), 400);
+  const prepared = buildPreparedImport(rows, "2026-08-01");
+  assert.equal(prepared.counts.provisional, 1);
   assert.match(
-    plan.candidates.find((candidate) => candidate.satispayId === "refund-partial").memo,
+    prepared.candidates.find((candidate) => candidate.satispayId === "refund-partial").memo,
     /cash and benefit split/,
   );
   assert.equal(
-    plan.candidates.find((candidate) => candidate.satispayId === "refund-full").amountMilliunits,
+    prepared.candidates.find((candidate) => candidate.satispayId === "refund-full")
+      .amountMilliunits,
     4000,
   );
 });
@@ -293,9 +326,10 @@ test("a partial refund is ambiguous when two purchases could absorb it", () => {
     row(date(27), "Cafe", -20, "🏬 a un Negozio", -20, null, 120, "purchase-a"),
     row(date(26), "Cafe", -15, "🏬 a un Negozio", -15, null, 140, "purchase-b"),
   ];
-  const audit = analyzeLedger(rows);
-  assert.equal(audit.resolved[0].reviewReason, "ambiguous_refund_purchase");
-  assert.equal(audit.resolved[0].amountCents, 1000);
+  const refund = byId(rows, "refund");
+  assert.equal(refund._tag, "ProvisionalTransaction");
+  assert.equal(refund.reason, "ambiguous_refund_purchase");
+  assert.equal(refund.provisionalWalletAmount, 1000);
 });
 test("a partial refund matches the only purchase large enough to absorb it", () => {
   const rows = [
@@ -304,9 +338,9 @@ test("a partial refund matches the only purchase large enough to absorb it", () 
     row(date(27), "Cafe", -20, "🏬 a un Negozio", -20, null, 120, "purchase-large"),
     row(date(26), "Cafe", -5, "🏬 a un Negozio", -5, null, 140, "purchase-small"),
   ];
-  const audit = analyzeLedger(rows);
-  assert.equal(audit.resolved[0].reviewReason, undefined);
-  assert.equal(audit.resolved[0].amountCents, 1000);
+  const refund = byId(rows, "refund");
+  assert.equal(refund._tag, "ImportCandidate");
+  assert.equal(refund.walletAmount, 1000);
 });
 test("a partial refund of a benefit-only purchase restores no wallet amount", () => {
   const rows = [
@@ -314,16 +348,16 @@ test("a partial refund of a benefit-only purchase restores no wallet amount", ()
     row(date(28), "Cafe", 6, "🔄 Rimborso", 6, null, 100, "refund"),
     row(date(27), "Cafe", -16, "🏬 a un Negozio", null, -16, 100, "purchase"),
   ];
-  const audit = analyzeLedger(rows);
-  assert.equal(audit.resolved[0].amountCents, 0);
-  assert.equal(audit.resolved[0].reviewReason, undefined);
-  const plan = buildImportPlan(rows, "2026-08-01");
-  assert.equal(plan.candidates.length, 0);
-  assert.equal(plan.counts.withoutAvailability, 2);
+  const refund = byId(rows, "refund");
+  assert.equal(refund._tag, "SkippedMovement");
+  assert.equal(walletCents(refund), 0);
+  const prepared = buildPreparedImport(rows, "2026-08-01");
+  assert.equal(prepared.candidates.length, 0);
+  assert.equal(prepared.counts.withoutAvailability, 2);
 });
 test("non-refund unknown types remain importable; input IDs stay stable", () => {
   const rows = [headers, row(date(28), "-", -12.5, "Altro", -12.5, null, 90, "unknown")];
-  const p = buildImportPlan(rows, "2026-08-01");
+  const p = buildPreparedImport(rows, "2026-08-01");
   assert.equal(p.candidates.length, 1);
   assert.equal(p.candidates[0].amountMilliunits, -12500);
   assert.equal(p.candidates[0].satispayId, "unknown");
@@ -335,7 +369,7 @@ test("global balance audit tolerates out-of-order intermediate card settlements"
     row(date(27), "Card", -10, "Carta ••2156", -10, null, 105, "two"),
     row(date(26), "Old", -1, "Altro", -1, null, 100, "three"),
   ];
-  const check = analyzeLedger(data).balanceCheck;
+  const check = classified(data).balanceCheck;
   assert.equal(check.status, "ok");
   assert.equal(check.discrepancyMilliunits, 0);
 });
@@ -346,9 +380,9 @@ test("balance audit detects a discrepancy without blocking normal transactions",
     row(date(27), "Card", -10, "Carta ••2156", -10, null, 105, "two"),
     row(date(26), "Old", -1, "Altro", -1, null, 100, "three"),
   ];
-  const check = analyzeLedger(data).balanceCheck;
+  const check = classified(data).balanceCheck;
   assert.equal(check.status, "mismatch");
   assert.equal(check.discrepancyMilliunits, 30000);
-  const p = buildImportPlan(data, "2026-08-01");
+  const p = buildPreparedImport(data, "2026-08-01");
   assert.equal(p.counts.rejected, 0);
 });

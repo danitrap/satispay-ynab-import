@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Effect } from "effect";
-import { buildImportPlan } from "../src/import-plan.ts";
+import { buildPreparedImport } from "../src/prepared-import.ts";
 import { handleRequestEffect } from "../src/index.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import { importPlanEffect } from "../src/ynab-service.ts";
+import { submitPreparedImportEffect } from "../src/ynab-service.ts";
 import { WorkbookReader } from "../src/workbook-reader.ts";
 
 const headers = [
@@ -133,13 +133,13 @@ test("unusable essential data never becomes a provisional YNAB transaction", asy
 
 test("10,000 candidates are submitted in 20 sequential batches with exact aggregate counts", async () => {
   const rows = [headers, ...Array.from({ length: 10_000 }, (_, index) => row(`tx-${index}`))];
-  const plan = buildImportPlan(rows, env.YNAB_IMPORT_FROM);
+  const prepared = buildPreparedImport(rows, env.YNAB_IMPORT_FROM);
   const sizes = [],
     ids = new Set();
   let active = 0,
     reads = 0;
   const result = await Effect.runPromise(
-    importPlanEffect(plan).pipe(
+    submitPreparedImportEffect(prepared).pipe(
       Effect.provide(
         requestLiveLayer(env, async (_url, init) => {
           if (init.method === "GET") {
@@ -179,13 +179,13 @@ test("10,000 candidates are submitted in 20 sequential batches with exact aggreg
 });
 
 test("more than 10,000 candidates fail before contacting YNAB", async () => {
-  const plan = buildImportPlan(
+  const prepared = buildPreparedImport(
     [headers, ...Array.from({ length: 10_001 }, (_, index) => row(`tx-${index}`))],
     env.YNAB_IMPORT_FROM,
   );
   let calls = 0;
   const error = await Effect.runPromise(
-    importPlanEffect(plan).pipe(
+    submitPreparedImportEffect(prepared).pipe(
       Effect.provide(
         requestLiveLayer(env, async () => {
           calls++;

@@ -5,7 +5,7 @@ import { handleRequestEffect } from "../src/index.ts";
 import { readSheetEffect, WorkbookError } from "../src/spreadsheet.ts";
 import { WorkbookReader } from "../src/workbook-reader.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import { importPlanEffect } from "../src/ynab-service.ts";
+import { submitPreparedImportEffect } from "../src/ynab-service.ts";
 import { ImportFailedError, YnabImportUncertainError } from "../src/errors.ts";
 
 const headers = ["Data", "Nome", "Descrizione", "Importo", "Tipo", "Stato", "Disponibilità", "ID"];
@@ -93,7 +93,7 @@ test("an import posts only to the target snapshot that was validated", async () 
     submitted.push(JSON.parse(init.body));
     return Response.json({ data: { transaction_ids: ["created"], duplicate_import_ids: [] } });
   };
-  const plan = {
+  const prepared = {
     counts: { rejected: 0 },
     candidates: [
       {
@@ -107,7 +107,7 @@ test("an import posts only to the target snapshot that was validated", async () 
     ],
   };
   const result = await Effect.runPromise(
-    importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, fetchFn))),
+    submitPreparedImportEffect(prepared).pipe(Effect.provide(requestLiveLayer(env, fetchFn))),
   );
   assert.equal(result.processed, 1);
   assert.equal(targetReads, 1);

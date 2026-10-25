@@ -1,4 +1,5 @@
-import { PlanInputError, WorksheetInputError, type Milliunits } from "./domain.ts";
+import { WorksheetInputError, type Milliunits } from "./domain.ts";
+import { PreparedImportInputError } from "./prepared-import.ts";
 import {
   classifyMovements,
   type ClassifiedMovement,
@@ -55,7 +56,8 @@ function presentRow(classified: ClassifiedMovement): PreviewRow {
 
 /** Whole-export preview. The domain classifies movements; this only shapes the dry-run summary. */
 function presentPreview(classification: MovementClassification) {
-  if (classification.totals._tag === "Overflow") throw new PlanInputError("AmountOverflow");
+  if (classification.totals._tag === "Overflow")
+    throw new PreparedImportInputError("AmountOverflow");
   const totals = classification.totals;
   const all = classification.movements.map(presentRow);
   const byType = new Map<string, { include: number; skip: number; review: number }>();

@@ -16,7 +16,7 @@ export const centsToMilliunits = (value: Cents): Milliunits | null => makeMilliu
 export const negateCents = (value: Cents): Cents => -value as Cents;
 
 /**
- * Excel number, or the Italian amount text Satispay writes into cells
+ * A number, or Italian amount text
  * (`-12,50`, `+1.234,56`, `€ 9,90`, `(12,50)`).
  */
 export function parseLocalizedNumber(value: unknown): number | null {
@@ -57,17 +57,6 @@ export function calendarDate(value: string): CalendarDate | null {
 }
 export const satispayTransactionId = (value: string): SatispayTransactionId | null =>
   value.trim() ? (value.trim() as SatispayTransactionId) : null;
-
-export type PlanInputReason =
-  "InvalidCutoff" | "EmptyWorkbook" | "MissingColumns" | "MissingIdColumn" | "AmountOverflow";
-export class PlanInputError extends Error {
-  readonly _tag = "PlanInputError";
-  readonly reason: PlanInputReason;
-  constructor(reason: PlanInputReason) {
-    super(reason);
-    this.reason = reason;
-  }
-}
 
 /** Expected structural worksheet failures, separate from programming defects. */
 export class WorksheetInputError extends Error {

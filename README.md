@@ -44,7 +44,7 @@ Satispay .xlsx export
         │                                        │
     Resolve mixed refunds                        │
         │                                        │
-    Build import plan                            │
+    Build prepared import                        │
         │                                        │
         ├── /preview ──► Read-only summary       │
         ├── /prepare ──► Cutoff-aware dry run    │
@@ -247,7 +247,7 @@ A failed check returns HTTP **401** `{ "ok": false, "error": "Unauthorized" }`. 
 | GET | `/ynab/accounts` | Discover accessible Satispay-named YNAB accounts. Inspects at most 20 plans; `truncated` is true when later plans were not searched | No |
 | POST | `/inspect` | Inspect workbook or CSV columns and aggregate statistics | No |
 | POST | `/preview` | Analyze all wallet movements; ignore the import cutoff | No |
-| POST | `/prepare` | Build a cutoff-aware import plan | No |
+| POST | `/prepare` | Build a cutoff-aware prepared import | No |
 | POST | `/import` | Submit valid movements to YNAB | **Yes** |
 
 `/inspect` accepts `.xlsx` and CSV. The other upload endpoints accept `.xlsx` only. Upload a raw file body (recommended) or a multipart file in the field `file`.
@@ -377,10 +377,9 @@ src/
 ├── spreadsheet.ts     XLSX decoding and workbook inspection
 ├── workbook-reader.ts Injectable external XLSX decoder
 ├── csv.ts             CSV inspection
-├── ledger.ts          Pure refund resolution and balance auditing
-├── preview.ts         Pure whole-export classification and summaries
-├── import-plan.ts     Pure cutoff-aware import planning
-├── import-handler.ts  Decode → plan → optionally import
+├── preview.ts         Presents the shared classification without an import cutoff
+├── prepared-import.ts Builds a prepared import for /prepare and /import
+├── import-handler.ts  Decode a Satispay export, then prepare or import
 ├── ynab-service.ts    YNAB Context.Service and its HTTP Layer
 ├── ynab-contract.ts   Explicit, infrastructure-free YNAB operation contracts
 └── ynab.ts            Effect HttpClient, Schema validation, YNAB API

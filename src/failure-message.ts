@@ -1,5 +1,5 @@
 import type {
-  ImportPlanError,
+  PreparedImportError,
   YnabAccountError,
   YnabImportRejectedError,
   YnabImportUncertainError,
@@ -10,7 +10,7 @@ import type {
 /** One safe presentation policy; error values retain machine-readable reasons. */
 export function failureMessage(
   error:
-    | ImportPlanError
+    | PreparedImportError
     | YnabAccountError
     | YnabImportRejectedError
     | YnabImportUncertainError
@@ -18,7 +18,7 @@ export function failureMessage(
     | YnabTransportError,
 ): string {
   switch (error._tag) {
-    case "ImportPlanError":
+    case "PreparedImportError":
       return {
         InvalidCutoff: "Invalid YNAB_IMPORT_FROM: expected YYYY-MM-DD",
         EmptyWorkbook: "Empty Satispay spreadsheet",

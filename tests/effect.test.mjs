@@ -5,7 +5,7 @@ import { Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
 import { importIdEffect } from "../src/ynab.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import { importPlanEffect, findAccountsEffect } from "../src/ynab-service.ts";
+import { submitPreparedImportEffect, findAccountsEffect } from "../src/ynab-service.ts";
 import { readSheetEffect, WorkbookError } from "../src/spreadsheet.ts";
 
 test("Cloudflare request handler is an Effect and retains unauthorized protection", async () => {
@@ -19,9 +19,11 @@ test("Cloudflare request handler is an Effect and retains unauthorized protectio
   assert.equal(res.status, 401);
 });
 test("Effect YNAB program prevents writes while disabled", async () => {
-  const plan = { counts: { rejected: 0 }, candidates: [] };
+  const prepared = { counts: { rejected: 0 }, candidates: [] };
   const result = await Effect.runPromiseExit(
-    importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer({ YNAB_WRITE_ENABLED: "false" }))),
+    submitPreparedImportEffect(prepared).pipe(
+      Effect.provide(requestLiveLayer({ YNAB_WRITE_ENABLED: "false" })),
+    ),
   );
   assert.equal(result._tag, "Failure");
 });
@@ -54,7 +56,7 @@ test("Effect decodes YNAB plans instead of trusting an untyped response", async 
   );
 });
 test("Effect validates account schema and never posts to unexpected account data", async () => {
-  const plan = {
+  const prepared = {
     counts: { rejected: 0 },
     candidates: [
       {
@@ -84,13 +86,15 @@ test("Effect validates account schema and never posts to unexpected account data
     );
   };
   await assert.rejects(
-    Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, fetchFn)))),
+    Effect.runPromise(
+      submitPreparedImportEffect(prepared).pipe(Effect.provide(requestLiveLayer(env, fetchFn))),
+    ),
     /Target must be/,
   );
   assert.equal(postCount, 0);
 });
 test("Effect refuses malformed successful YNAB POST responses without retrying writes", async () => {
-  const plan = {
+  const prepared = {
     counts: { rejected: 0 },
     candidates: [
       {
@@ -125,13 +129,15 @@ test("Effect refuses malformed successful YNAB POST responses without retrying w
     );
   };
   await assert.rejects(
-    Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, fetchFn)))),
+    Effect.runPromise(
+      submitPreparedImportEffect(prepared).pipe(Effect.provide(requestLiveLayer(env, fetchFn))),
+    ),
     /Unexpected YNAB response/,
   );
   assert.equal(writes, 1);
 });
 test("Effect import response distinguishes matched IDs from actual imported movements", async () => {
-  const plan = {
+  const prepared = {
     counts: { rejected: 0 },
     candidates: [
       {
@@ -166,7 +172,7 @@ test("Effect import response distinguishes matched IDs from actual imported move
     );
   };
   const result = await Effect.runPromise(
-    importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, fetchFn))),
+    submitPreparedImportEffect(prepared).pipe(Effect.provide(requestLiveLayer(env, fetchFn))),
   );
   assert.deepEqual(result, {
     submitted: 1,
@@ -209,7 +215,7 @@ test("a lost POST response is a typed uncertain import and is never retried", as
     throw new Error("transport details must stay private");
   };
   const error = await Effect.runPromise(
-    importPlanEffect({
+    submitPreparedImportEffect({
       counts: { rejected: 0 },
       candidates: [
         {

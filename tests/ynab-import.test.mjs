@@ -1,13 +1,15 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { buildImportPlan, summarizeImportPlan } from "../src/import-plan.ts";
+import { buildPreparedImport } from "../src/prepared-import.ts";
 import { Effect } from "effect";
 import { importIdEffect, buildYnabTransactionsEffect } from "../src/ynab.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import { importPlanEffect, findAccountsEffect } from "../src/ynab-service.ts";
+import { submitPreparedImportEffect, findAccountsEffect } from "../src/ynab-service.ts";
 
-const runImport = (plan, env, mockFetch) =>
-  Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, mockFetch))));
+const runImport = (prepared, env, mockFetch) =>
+  Effect.runPromise(
+    submitPreparedImportEffect(prepared).pipe(Effect.provide(requestLiveLayer(env, mockFetch))),
+  );
 const runAccountDiscovery = (env, mockFetch) =>
   Effect.runPromise(findAccountsEffect.pipe(Effect.provide(requestLiveLayer(env, mockFetch))));
 
@@ -41,7 +43,7 @@ const row = (id, amount, type = "🏬 a un Negozio", when = day, other = {}) => 
 ];
 
 test("imports wallet portion, skips meal vouchers and already reconciled dates", () => {
-  const plan = buildImportPlan(
+  const prepared = buildPreparedImport(
     [
       headers,
       [day, "Bar", "Pranzo", -20, "🏬 a un Negozio", "✅ Approvato", -5, -15, null, 95, "tx-a"],
@@ -63,27 +65,27 @@ test("imports wallet portion, skips meal vouchers and already reconciled dates",
     ],
     "2026-10-15",
   );
-  assert.equal(plan.candidates.length, 2);
+  assert.equal(prepared.candidates.length, 2);
   assert.deepEqual(
-    plan.candidates.map((x) => x.amountMilliunits),
+    prepared.candidates.map((x) => x.amountMilliunits),
     [-5000, 2990],
   );
-  assert.equal(plan.counts.withoutAvailability, 1);
-  assert.equal(plan.counts.olderThanStart, 1);
-  assert.equal(summarizeImportPlan(plan).netMilliunits, -2010);
+  assert.equal(prepared.counts.withoutAvailability, 1);
+  assert.equal(prepared.counts.olderThanStart, 1);
+  assert.equal(prepared.summary.netMilliunits, -2010);
 });
 test("duplicate IDs stay blocked, bank top-ups are ordinary inflows", () => {
-  const plan = buildImportPlan(
+  const prepared = buildPreparedImport(
     [headers, row("dup", -4), row("dup", -2), row("topup", 50, "🏦 Dalla Banca")],
     "2026-10-01",
   );
-  assert.equal(plan.candidates.length, 1);
-  assert.equal(plan.candidates[0].amountMilliunits, 50000);
-  assert.equal(plan.issues.missing_nontext_or_duplicate_id, 2);
-  assert.equal(plan.issues.unknown_or_transfer_type, undefined);
+  assert.equal(prepared.candidates.length, 1);
+  assert.equal(prepared.candidates[0].amountMilliunits, 50000);
+  assert.equal(prepared.issues.missing_or_duplicate_id, 2);
+  assert.equal(prepared.issues.unknown_or_transfer_type, undefined);
 });
 test("any Disponibilità outflow imports as a normal expense even for unknown types and savings", () => {
-  const plan = buildImportPlan(
+  const prepared = buildPreparedImport(
     [
       headers,
       row("p2p", -12, "👤 a una Persona"),
@@ -95,14 +97,17 @@ test("any Disponibilità outflow imports as a normal expense even for unknown ty
     ],
     "2026-10-01",
   );
-  assert.equal(plan.candidates.length, 6);
-  assert.equal(plan.counts.rejected, 0);
-  assert.equal(plan.outflowMilliunits, 718500);
-  assert.equal(plan.inflowMilliunits, 0);
-  assert.equal(plan.candidates.find((t) => t.satispayId === "unknown").payee, "Satispay — Altro");
+  assert.equal(prepared.candidates.length, 6);
+  assert.equal(prepared.counts.rejected, 0);
+  assert.equal(prepared.outflowMilliunits, 718500);
+  assert.equal(prepared.inflowMilliunits, 0);
+  assert.equal(
+    prepared.candidates.find((t) => t.satispayId === "unknown").payee,
+    "Satispay — Altro",
+  );
 });
 test("any Disponibilità inflow imports as ordinary inflow including bank, P2P and unknown types", () => {
-  const plan = buildImportPlan(
+  const prepared = buildPreparedImport(
     [
       headers,
       row("bank", 254.35, "🏦 Dalla Banca"),
@@ -113,10 +118,13 @@ test("any Disponibilità inflow imports as ordinary inflow including bank, P2P a
     ],
     "2026-10-01",
   );
-  assert.equal(plan.candidates.length, 5);
-  assert.equal(plan.inflowMilliunits, 3847620);
-  assert.equal(plan.candidates.find((t) => t.satispayId === "cashback").payee, "Satispay Cashback");
-  assert.equal(plan.counts.rejected, 0);
+  assert.equal(prepared.candidates.length, 5);
+  assert.equal(prepared.inflowMilliunits, 3847620);
+  assert.equal(
+    prepared.candidates.find((t) => t.satispayId === "cashback").payee,
+    "Satispay Cashback",
+  );
+  assert.equal(prepared.counts.rejected, 0);
 });
 
 test("import IDs are deterministic, privacy preserving and at most 36 chars", async () => {
@@ -127,9 +135,9 @@ test("import IDs are deterministic, privacy preserving and at most 36 chars", as
   assert.equal(a.includes("external"), false);
 });
 test("YNAB payload uses imported cleared unapproved transactions", async () => {
-  const plan = buildImportPlan([headers, row("a", -12.34)], "2026-10-01");
+  const prepared = buildPreparedImport([headers, row("a", -12.34)], "2026-10-01");
   const payload = await Effect.runPromise(
-    buildYnabTransactionsEffect(plan.candidates, "account-uuid"),
+    buildYnabTransactionsEffect(prepared.candidates, "account-uuid"),
   );
   assert.equal(payload[0].amount, -12340);
   assert.equal(payload[0].approved, false);
@@ -138,17 +146,17 @@ test("YNAB payload uses imported cleared unapproved transactions", async () => {
   assert.equal(payload[0].import_id.length, 36);
 });
 test("writes disabled means zero YNAB requests", async () => {
-  const plan = buildImportPlan([headers, row("a", -2)], "2026-10-01");
+  const prepared = buildPreparedImport([headers, row("a", -2)], "2026-10-01");
   let requests = 0;
   const mock = async () => {
     requests++;
     throw Error("should not fetch");
   };
-  await assert.rejects(runImport(plan, { YNAB_WRITE_ENABLED: "false" }, mock), /disabled/);
+  await assert.rejects(runImport(prepared, { YNAB_WRITE_ENABLED: "false" }, mock), /disabled/);
   assert.equal(requests, 0);
 });
 test("blocks writes on non-Satispay target account", async () => {
-  const plan = buildImportPlan([headers, row("a", -2)], "2026-10-01");
+  const prepared = buildPreparedImport([headers, row("a", -2)], "2026-10-01");
   let writes = 0;
   const mock = async (_url, init) => {
     if (init.method === "POST") writes++;
@@ -161,7 +169,7 @@ test("blocks writes on non-Satispay target account", async () => {
   };
   await assert.rejects(
     runImport(
-      plan,
+      prepared,
       {
         YNAB_TOKEN: "fake",
         YNAB_PLAN_ID: "plan",
@@ -175,7 +183,7 @@ test("blocks writes on non-Satispay target account", async () => {
   assert.equal(writes, 0);
 });
 test("YNAB import accepts successful batch with duplicate_import_ids", async () => {
-  const plan = buildImportPlan([headers, row("a", -12.34)], "2026-10-01");
+  const prepared = buildPreparedImport([headers, row("a", -12.34)], "2026-10-01");
   const calls = [];
   const mock = async (url, init) => {
     calls.push({
@@ -196,7 +204,7 @@ test("YNAB import accepts successful batch with duplicate_import_ids", async () 
     );
   };
   const result = await runImport(
-    plan,
+    prepared,
     {
       YNAB_TOKEN: "fake",
       YNAB_PLAN_ID: "plan",
@@ -264,7 +272,7 @@ test("account discovery reports truncation after the first 20 plans", async () =
   );
   assert.deepEqual(
     calls.filter((path) => path.includes("/accounts")),
-    plans.slice(0, 20).map((plan) => `https://api.ynab.com/v1/plans/${plan.id}/accounts`),
+    plans.slice(0, 20).map((prepared) => `https://api.ynab.com/v1/plans/${prepared.id}/accounts`),
   );
 });
 
@@ -288,7 +296,10 @@ test("account discovery inspects every plan when YNAB returns 20", async () => {
 });
 
 test("matched transaction IDs do not inflate processed movement count", async () => {
-  const plan = buildImportPlan([headers, row("first", -1), row("second", -2)], "2026-10-01");
+  const prepared = buildPreparedImport(
+    [headers, row("first", -1), row("second", -2)],
+    "2026-10-01",
+  );
   const mock = async (_url, init) => {
     if (init.method === "GET")
       return new Response(
@@ -304,7 +315,7 @@ test("matched transaction IDs do not inflate processed movement count", async ()
     );
   };
   const result = await runImport(
-    plan,
+    prepared,
     {
       YNAB_TOKEN: "test",
       YNAB_PLAN_ID: "plan",
@@ -325,7 +336,10 @@ test("matched transaction IDs do not inflate processed movement count", async ()
   });
 });
 test("repeated import IDs count as duplicates, not processed movements", async () => {
-  const plan = buildImportPlan([headers, row("first", -1), row("second", -2)], "2026-10-01");
+  const prepared = buildPreparedImport(
+    [headers, row("first", -1), row("second", -2)],
+    "2026-10-01",
+  );
   const mock = async (_url, init) => {
     if (init.method === "GET")
       return new Response(
@@ -342,7 +356,7 @@ test("repeated import IDs count as duplicates, not processed movements", async (
     );
   };
   const result = await runImport(
-    plan,
+    prepared,
     {
       YNAB_TOKEN: "test",
       YNAB_PLAN_ID: "plan",
