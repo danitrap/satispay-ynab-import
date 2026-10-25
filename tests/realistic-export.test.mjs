@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { readSheet } from "read-excel-file/universal";
 import { Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
-import { requestLiveLayer } from "../src/ynab-service.ts";
+import { requestLiveLayer } from "../src/main.ts";
 import { createRealisticWorkbook } from "../scripts/generate-satispay-fixture.mjs";
 
 const workbook = readFileSync(new URL("./fixtures/satispay-realistic.xlsx", import.meta.url));

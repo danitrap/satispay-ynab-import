@@ -1,25 +1,16 @@
-import { CalendarDateSchema, YnabAccountIdSchema, YnabPlanIdSchema } from "./domain-schema.ts";
-import { Config, ConfigProvider, Context, Data, Effect, Layer, Schema } from "effect";
-
-/** Cloudflare bindings are read only at the request adapter. */
-export type YnabEnv = {
-  YNAB_TOKEN?: string;
-  YNAB_PLAN_ID?: string;
-  YNAB_ACCOUNT_ID?: string;
-  YNAB_IMPORT_FROM?: string;
-  YNAB_WRITE_ENABLED?: string;
-};
-export type AppEnv = YnabEnv & { UPLOAD_TOKEN?: string };
-
-export class ConfigurationError extends Data.TaggedError("ConfigurationError")<{
-  readonly key: keyof AppEnv;
-  readonly message: string;
-}> {}
+import {
+  AppConfig,
+  ConfigurationError,
+  type AppConfigShape,
+  type AppEnv,
+} from "../application/app-config.ts";
+import { CalendarDateSchema, YnabAccountIdSchema, YnabPlanIdSchema } from "../domain-schema.ts";
+import { Config, ConfigProvider, Effect, Layer, Schema } from "effect";
 
 const NonEmptyString = Schema.Trimmed.check(Schema.isMinLength(1));
 const Secret = Schema.Redacted(NonEmptyString);
 
-function makeConfig(env: AppEnv) {
+function makeConfig(env: AppEnv): AppConfigShape {
   const provider = ConfigProvider.fromUnknown(env, { preserveEmptyStrings: true });
   const read = <A>(config: Config.Config<A>, key: keyof AppEnv, message: string) =>
     config.parse(provider).pipe(
@@ -66,12 +57,5 @@ function makeConfig(env: AppEnv) {
     ).pipe(Effect.map((value) => value === "true")),
   };
 }
-
-export type YnabTarget = Effect.Success<ReturnType<typeof makeConfig>["target"]>;
-
-/** Values are decoded lazily: inspection and health never require YNAB credentials. */
-export class AppConfig extends Context.Service<AppConfig, ReturnType<typeof makeConfig>>()(
-  "satispay/AppConfig",
-) {}
 
 export const appConfigLayer = (env: AppEnv) => Layer.succeed(AppConfig, makeConfig(env));

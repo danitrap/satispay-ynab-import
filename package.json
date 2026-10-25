@@ -6,15 +6,18 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "format": "prettier --write src tests scripts package.json tsconfig.json .prettierrc.json",
-    "format:check": "prettier --check src tests scripts package.json tsconfig.json .prettierrc.json",
+    "format": "prettier --write src tests scripts package.json tsconfig.json .prettierrc.json .dependency-cruiser.json",
+    "format:check": "prettier --check src tests scripts package.json tsconfig.json .prettierrc.json .dependency-cruiser.json",
     "fixture:satispay": "node scripts/generate-satispay-fixture.mjs",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "check": "tsc --noEmit",
+    "check:deps": "depcruise --config .dependency-cruiser.json --output-type err src",
     "check:bundle": "wrangler deploy --dry-run --outdir /tmp/satispay-effect-v4-dry-run"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261018.1",
+    "@swc/core": "^1.16.20",
+    "dependency-cruiser": "^18.7.0",
     "prettier": "3.9.10",
     "typescript": "^7.0.2",
     "wrangler": "^4.151.1"

@@ -1,5 +1,5 @@
 name = "satispay-ynab-import"
-main = "src/index.ts"
+main = "src/main.ts"
 compatibility_date = "2026-10-01"
 workers_dev = true
 

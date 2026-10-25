@@ -1,7 +1,7 @@
 import type { PlanInputReason } from "./domain.ts";
 import { failureMessage } from "./failure-message.ts";
 import { Data } from "effect";
-import type { ConfigurationError } from "./config.ts";
+import type { ConfigurationError } from "./application/app-config.ts";
 import type { summarizeImportPlan } from "./import-plan.ts";
 import type { YnabImportResult } from "./ynab-contract.ts";
 

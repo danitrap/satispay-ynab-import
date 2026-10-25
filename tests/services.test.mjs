@@ -2,10 +2,10 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Effect } from "effect";
 import { YnabError } from "../src/ynab.ts";
+import { requestLiveLayer } from "../src/main.ts";
 import {
   YnabService,
   ynabTestLayer,
-  requestLiveLayer,
   findAccountsEffect,
   importPlanEffect,
 } from "../src/ynab-service.ts";

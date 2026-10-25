@@ -1,7 +1,7 @@
 import { observeOperation } from "./telemetry.ts";
 import { PlanInputError } from "./domain.ts";
 import { Effect } from "effect";
-import { AppConfig } from "./config.ts";
+import { AppConfig } from "./application/app-config.ts";
 import { buildImportPlan, summarizeImportPlan } from "./import-plan.ts";
 import { ImportFailedError, ImportPlanError } from "./errors.ts";
 import { readSheetEffect } from "./spreadsheet.ts";

@@ -3,9 +3,9 @@ import { YnabAccountIdSchema, YnabPlanIdSchema } from "./domain-schema.ts";
 import type { SatispayTransactionId, YnabAccountId } from "./domain.ts";
 import type { YnabAccounts } from "./ynab-contract.ts";
 import { Effect, Redacted, Schema, Schedule } from "effect";
-import { AppConfig, type YnabTarget } from "./config.ts";
+import { AppConfig, type YnabTarget } from "./application/app-config.ts";
 import type { YnabImportResult, YnabServiceApi } from "./ynab-contract.ts";
-export type { YnabEnv } from "./config.ts";
+export type { YnabEnv } from "./application/app-config.ts";
 import {
   YnabError,
   YnabTransportError,

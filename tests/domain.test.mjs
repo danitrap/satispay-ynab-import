@@ -12,7 +12,8 @@ import { buildImportPlan } from "../src/import-plan.ts";
 import { analyzeLedger } from "../src/ledger.ts";
 import { previewSatispay } from "../src/preview.ts";
 import { Effect } from "effect";
-import { importPlanEffect, requestLiveLayer } from "../src/ynab-service.ts";
+import { requestLiveLayer } from "../src/main.ts";
+import { importPlanEffect } from "../src/ynab-service.ts";
 
 const headers = ["Data", "Nome", "Descrizione", "Importo", "Tipo", "Stato", "Disponibilità", "ID"];
 const row = (id, amount) => ["2026-10-18", "Shop", "", amount, "Altro", "✅ Approvato", amount, id];

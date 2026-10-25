@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { AppConfig } from "../../src/config.ts";
+import { AppConfig } from "../../src/application/app-config.ts";
 import type { YnabServiceApi } from "../../src/ynab-contract.ts";
 import { YnabImportUncertainError, YnabWriteDisabledError } from "../../src/errors.ts";
 

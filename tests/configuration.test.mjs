@@ -3,7 +3,8 @@ import { strict as assert } from "node:assert";
 import worker from "../src/index.ts";
 import { Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
-import { requestLiveLayer, findAccountsEffect } from "../src/ynab-service.ts";
+import { requestLiveLayer } from "../src/main.ts";
+import { findAccountsEffect } from "../src/ynab-service.ts";
 
 test("account discovery reports missing configuration without exposing bindings", async () => {
   const response = await worker.fetch(

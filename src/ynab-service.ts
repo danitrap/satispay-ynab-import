@@ -1,9 +1,4 @@
-import { authRateLimitLayer, type WorkerEnv } from "./auth.ts";
-import { workbookReaderLayer } from "./workbook-reader.ts";
-import { operationLogger } from "./telemetry.ts";
-import { Context, Effect, Layer, Logger } from "effect";
-import { appConfigLayer } from "./config.ts";
-import { FetchHttpClient } from "effect/http";
+import { Context, Effect, Layer } from "effect";
 import type { ImportPlan } from "./import-plan.ts";
 import type { YnabServiceApi } from "./ynab-contract.ts";
 import { makeYnabClient } from "./ynab.ts";
@@ -14,20 +9,6 @@ export class YnabService extends Context.Service<YnabService, YnabServiceApi>()(
 ) {}
 
 export const ynabHttpLayer = Layer.effect(YnabService, makeYnabClient);
-
-/** Single request composition root. Never retain Cloudflare bindings in a global runtime. */
-export const requestLiveLayer = (env: WorkerEnv, fetchFn: typeof fetch = fetch) => {
-  const config = appConfigLayer(env);
-  const transport = FetchHttpClient.layer.pipe(
-    Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchFn)),
-  );
-  return Layer.mergeAll(
-    ynabHttpLayer.pipe(Layer.provideMerge(config), Layer.provide(transport)),
-    workbookReaderLayer,
-    authRateLimitLayer(env.AUTH_FAILURE_LIMITER),
-    Logger.layer([operationLogger]),
-  );
-};
 
 export const ynabTestLayer = (service: YnabServiceApi) => Layer.succeed(YnabService, service);
 export const findAccountsEffect = Effect.flatMap(YnabService, (service) => service.findAccounts);

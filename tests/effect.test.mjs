@@ -4,7 +4,8 @@ import { strict as assert } from "node:assert";
 import { Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
 import { importIdEffect } from "../src/ynab.ts";
-import { requestLiveLayer, importPlanEffect, findAccountsEffect } from "../src/ynab-service.ts";
+import { requestLiveLayer } from "../src/main.ts";
+import { importPlanEffect, findAccountsEffect } from "../src/ynab-service.ts";
 import { readSheetEffect, WorkbookError } from "../src/spreadsheet.ts";
 
 test("Cloudflare request handler is an Effect and retains unauthorized protection", async () => {
