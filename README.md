@@ -456,28 +456,21 @@ The tests use Node's built-in test runner. They cover wallet-only funding, mixed
 
 ### Local development
 
-`npm test` does not call YNAB and does not read Worker Secrets. It injects synthetic movements and in-memory services. `npm run dev` runs `wrangler dev`, which loads `[vars]` from `wrangler.toml` and Secrets from the Git-ignored `.dev.vars` (copied from `.dev.vars.example`). The local Worker listens on `http://localhost:8787`.
+`npm test` does not call YNAB and does not read Worker Secrets. It injects synthetic movements and in-memory services. `npm run dev` runs `wrangler dev` on `http://localhost:8787`. It loads `[vars]` from the tracked `wrangler.toml`, then applies the Git-ignored `.dev.vars`. A name in `.dev.vars` overrides the same name in `[vars]`.
+
+The settings the Worker reads are listed in [Quick start](#quick-start-from-fork-to-first-preview). In this checkout, copy the secrets template and keep writes off for local runs:
 
 ~~~bash
-cp wrangler.example.toml wrangler.toml
 cp .dev.vars.example .dev.vars
 npm test
 npm run dev
 ~~~
 
-Settings the Worker reads:
+Add `YNAB_WRITE_ENABLED="false"` to `.dev.vars` before `npm run dev`. The tracked `wrangler.toml` enables writes. Under `wrangler dev`, the `.dev.vars` value overrides that `[vars]` entry, so a local `/import` does not write to the YNAB plan.
 
-| Setting | Where it is set locally | Role |
-| --- | --- | --- |
-| `UPLOAD_TOKEN` | `.dev.vars` | Secret. Bearer token for every route except `GET /health` |
-| `YNAB_TOKEN` | `.dev.vars` | Secret. YNAB personal access token |
-| `YNAB_PLAN_ID` | `.dev.vars` | Secret. Target YNAB plan ID |
-| `YNAB_ACCOUNT_ID` | `.dev.vars` | Secret. Destination YNAB wallet account ID. The account must be active, on-budget, and named Satispay |
-| `YNAB_IMPORT_FROM` | `[vars]` | Inclusive import cutoff, `YYYY-MM-DD`. Required to build a prepared import |
-| `YNAB_WRITES_ENABLED` | `[vars]` | Write switch. Accepted values are `"true"` and `"false"`; if absent, writes stay disabled |
-| `AUTH_FAILURE_LIMITER` | `[[ratelimits]]` binding | Optional. Ten failed upload-token checks per 60 seconds for each client address, in the Cloudflare location that handled the request. A missing binding leaves failures unthrottled |
+Do not copy `wrangler.example.toml` over `wrangler.toml` here. That file is the tracked deploy configuration. A fork replaces it with its own copy (`cp wrangler.example.toml wrangler.toml`), as [Contributing](CONTRIBUTING.md#set-up-your-fork) describes.
 
-Leave the write switch `"false"` until a `/prepare` dry run looks right. `npm run check:bundle` dry-runs the Wrangler bundle and does not deploy.
+`npm run check:bundle` dry-runs the Wrangler bundle and does not deploy.
 
 GitHub Actions runs the test suite, TypeScript checks, and Wrangler bundle checks on pull requests and pushes to `main`.
 
