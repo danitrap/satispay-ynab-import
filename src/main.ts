@@ -1,6 +1,7 @@
 import { handleRequestEffect } from "./http/handle-request.ts";
 import { appConfigLayer } from "./infrastructure/app-config.ts";
 import { authRateLimitLayer, type WorkerEnv } from "./infrastructure/auth-rate-limit.ts";
+import { satispayExportReaderLayer } from "./infrastructure/satispay-export-reader.ts";
 import { operationLogger } from "./telemetry.ts";
 import { workbookReaderLayer } from "./workbook-reader.ts";
 import { ynabHttpLayer } from "./ynab-service.ts";
@@ -16,6 +17,7 @@ export const requestLiveLayer = (env: WorkerEnv, fetchFn: typeof fetch = fetch) 
   return Layer.mergeAll(
     ynabHttpLayer.pipe(Layer.provideMerge(config), Layer.provide(transport)),
     workbookReaderLayer,
+    satispayExportReaderLayer.pipe(Layer.provide(workbookReaderLayer)),
     authRateLimitLayer(env.AUTH_FAILURE_LIMITER),
     Logger.layer([operationLogger]),
   );
