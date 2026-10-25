@@ -258,7 +258,22 @@ A failed check returns HTTP **401** `{ "ok": false, "error": "Unauthorized" }`. 
 
 Configuration is validated only when an operation needs it. `/health` needs no credentials; `/inspect` and `/preview` need only `UPLOAD_TOKEN`; `/prepare` also needs a real calendar date in `YNAB_IMPORT_FROM`. Account discovery needs `YNAB_TOKEN`, and imports additionally need target plan/account IDs and an enabled write switch. An absent write switch defaults to disabled; its accepted values are exactly `"true"` and `"false"`.
 
-Authenticated configuration failures return HTTP **409**, disabled writes return **403**, and invalid workbooks, oversized candidate sets or unsuitable destination accounts return **422**. YNAB transport/response failures return **502**. Unusable individual rows are excluded and reported without blocking the remaining candidates. Import failures retain their existing `mode`, summary and `error` fields. If the POST outcome is uncertain, the error asks you to verify the import in YNAB before repeating it.
+Authenticated configuration failures return HTTP **409**, disabled writes return **403**, and invalid workbooks, oversized candidate sets or unsuitable destination accounts return **422**. YNAB transport/response failures return **502**. Unusable individual rows are excluded and reported without blocking the remaining candidates. If the POST outcome is uncertain, the error asks you to verify the import in YNAB before repeating it.
+
+### Response modes
+
+`mode` names the operation. Preview, prepare and import each start with that operation's name.
+
+| Endpoint | `mode` | Meaning |
+| --- | --- | --- |
+| `GET /health` | `ready` | The Worker is up |
+| `POST /inspect` | `inspect-only` | CSV inspection. An xlsx inspection omits `mode` |
+| `POST /preview` | `preview-only` | Movement classification for the whole export. Nothing is sent to YNAB |
+| `POST /prepare` | `prepare-only` | Prepared import for the import cutoff. Nothing is sent to YNAB |
+| `POST /import` | `import-completed` | YNAB accepted every submitted batch |
+| `POST /import` | `import-failed` | The import stopped. The body keeps the prepared-import summary and `error`. Earlier batches may already be confirmed |
+
+Import failures keep that `mode`, the prepared-import summary and `error`.
 
 ### Reading the result
 
@@ -366,7 +381,7 @@ src/
 ├── domain/            Domain layer for pure movement rules
 ├── application/       Use cases and ports: prepare import, import, list YNAB accounts
 ├── infrastructure/    Satispay export reader, YNAB gateway and Cloudflare bindings
-├── http/              Routes, authorization and bounded uploads
+├── http/              Controllers, presenters, authorization and bounded uploads
 ├── index.ts           Re-exports the Worker entry for existing imports
 ├── domain.ts          Pure constructors for dates, identifiers and exact money units
 ├── domain-schema.ts   Schema validation for branded boundary values
@@ -376,7 +391,7 @@ src/
 ├── spreadsheet.ts     XLSX decoding and workbook inspection
 ├── workbook-reader.ts Injectable external XLSX decoder
 ├── csv.ts             CSV inspection
-├── preview.ts         Presents the shared classification without an import cutoff
+├── preview.ts         Dry-run summary of the shared classification, without an import cutoff
 ├── prepared-import.ts Builds a prepared import for /prepare and /import
 └── import-handler.ts  Prepare an import, then submit it when the route is /import
 ~~~
@@ -390,7 +405,7 @@ The Worker uses [Effect v4](https://effect.website/) throughout its asynchronous
 - **Effect `HttpClient` + `FetchHttpClient`** run YNAB API requests using a fetch-compatible transport suitable for Cloudflare Workers.
 - **`HttpClientResponse.schemaBodyJson` + `Schema.decodeUnknownEffect`** validate the YNAB response envelope and operation-specific payloads instead of trusting untyped responses.
 - **`Effect.forEach`** produces stable SHA-256 import IDs with bounded concurrency.
-- **`Data.TaggedError` + `Effect.catchTags`** distinguish configuration, validation, transport and uncertain import failures. The import pipeline returns tagged application outcomes; the router owns HTTP status codes and JSON responses.
+- **`Data.TaggedError` + `Effect.catchTags`** distinguish configuration, validation, transport and uncertain import failures. The import pipeline returns tagged application outcomes. Controllers decode the upload, call the use case and hand that result to a presenter. Presenters own the JSON shape, the response mode and the error-to-status mapping.
 
 The domain modules stay independent of Effect. There is no global runtime holding Cloudflare request credentials; the live service Layer is provided per request.
 

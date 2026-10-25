@@ -54,7 +54,10 @@ function presentRow(classified: ClassifiedMovement): PreviewRow {
   }
 }
 
-/** Whole-export preview. The domain classifies movements; this only shapes the dry-run summary. */
+/**
+ * Whole-export preview. The domain classifies movements; this shapes the dry-run summary.
+ * The HTTP presenter owns the response mode.
+ */
 function presentPreview(classification: MovementClassification) {
   if (classification.totals._tag === "Overflow")
     throw new PreparedImportInputError("AmountOverflow");
@@ -80,7 +83,6 @@ function presentPreview(classification: MovementClassification) {
   const inflowCents = totals.inflowMilliunits / 10;
   const outflowCents = totals.outflowMilliunits / 10;
   return {
-    mode: "preview-only" as const,
     rowCount: all.length,
     eligible: count("include"),
     skipped: count("skip"),

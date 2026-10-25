@@ -39,7 +39,7 @@ test("prepare builds a prepared import without YNAB credentials or a write switc
   const response = await runRequest("prepare", { YNAB_WRITE_ENABLED: "invalid" });
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.mode, "import-preview");
+  assert.equal(body.mode, "prepare-only");
   assert.equal(body.eligible, 1);
   assert.equal(body.outflowMilliunits, 5000);
   assert.equal(body.imported, 0);
