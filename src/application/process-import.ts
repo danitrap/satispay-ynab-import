@@ -1,5 +1,5 @@
-import { importPrepared, type ImportFailure } from "./application/import-prepared.ts";
-import { prepareImportFromFile, type PreparedImportSummary } from "./application/prepare-import.ts";
+import { importPrepared, type ImportFailure } from "./import-prepared.ts";
+import { prepareImportFromFile, type PreparedImportSummary } from "./prepare-import.ts";
 import { observeOperation } from "./telemetry.ts";
 import { Data, Effect } from "effect";
 

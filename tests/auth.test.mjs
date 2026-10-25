@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import worker from "../src/index.ts";
+import worker from "../src/main.ts";
 
 const token = "test-secret";
 const workbook = readFileSync(new URL("./fixtures/satispay.xlsx", import.meta.url));

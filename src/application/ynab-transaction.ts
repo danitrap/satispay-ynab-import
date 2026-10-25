@@ -1,5 +1,5 @@
 import type { YnabTransaction } from "./ynab-gateway.ts";
-import type { CalendarDate, YnabAccountId } from "../domain.ts";
+import type { CalendarDate, YnabAccountId } from "../domain/primitives.ts";
 import type {
   AmbiguityReason,
   ImportCandidate,

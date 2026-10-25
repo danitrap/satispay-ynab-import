@@ -3,12 +3,12 @@ import { strict as assert } from "node:assert";
 import { Effect } from "effect";
 import { importPrepared } from "../src/application/import-prepared.ts";
 import { YnabGateway } from "../src/application/ynab-gateway.ts";
-import { buildPreparedImport } from "../src/prepared-import.ts";
-import { handleRequestEffect } from "../src/index.ts";
+import { buildPreparedImport } from "../src/infrastructure/build-prepared-import.ts";
+import { handleRequestEffect } from "../src/http/handle-request.ts";
 import { appConfigLayer } from "../src/infrastructure/app-config.ts";
 import { requestLiveLayer } from "../src/main.ts";
 import { importIdentity } from "../src/application/ynab-transaction.ts";
-import { WorkbookReader } from "../src/workbook-reader.ts";
+import { WorkbookReader } from "../src/application/workbook-reader.ts";
 
 // Pinned import identities for these synthetic Satispay movement identifiers.
 // The literals are today's `SPS:` + SHA-256 values. Recomputing them here would

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import worker from "../src/index.ts";
-import { summarizeSheet } from "../src/spreadsheet.ts";
+import worker from "../src/main.ts";
+import { summarizeSheet } from "../src/infrastructure/satispay-export-reader.ts";
 const endpoint = "https://local.invalid/inspect";
 const env = { UPLOAD_TOKEN: "test-secret" };
 function raw(body, contentType = "application/octet-stream") {

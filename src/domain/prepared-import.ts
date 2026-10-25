@@ -1,4 +1,4 @@
-import type { CalendarDate } from "../domain.ts";
+import type { CalendarDate } from "./primitives.ts";
 import { classifyMovements, type MovementClassification } from "./movement-classification.ts";
 import type { SatispayExportRead } from "./satispay-movement.ts";
 

@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Cause, Effect } from "effect";
-import { handleRequestEffect } from "../src/index.ts";
-import { readSheetEffect, WorkbookError } from "../src/spreadsheet.ts";
-import { WorkbookReader } from "../src/workbook-reader.ts";
+import { handleRequestEffect } from "../src/http/handle-request.ts";
+import { readSheetEffect, WorkbookError } from "../src/application/workbook-reader.ts";
+import { WorkbookReader } from "../src/application/workbook-reader.ts";
 import { ImportBatchError, importPrepared } from "../src/application/import-prepared.ts";
-import { ImportFailedError } from "../src/import-handler.ts";
+import { ImportFailedError } from "../src/application/process-import.ts";
 import { requestLiveLayer } from "../src/main.ts";
 import { preparedFromCandidates } from "./support/candidate-prepared.mjs";
 

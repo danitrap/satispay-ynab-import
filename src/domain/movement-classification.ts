@@ -5,7 +5,7 @@ import {
   type CalendarDate,
   type Cents,
   type Milliunits,
-} from "../domain.ts";
+} from "./primitives.ts";
 import type { MovementAmount, SatispayExportRead, SatispayMovement } from "./satispay-movement.ts";
 
 /**

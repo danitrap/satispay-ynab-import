@@ -1,14 +1,5 @@
-import { Context, Effect, Layer } from "effect";
-import { WorkbookError } from "./errors.ts";
-import type { SheetCell } from "./spreadsheet.ts";
-
-/** The external XLSX decoder is the only replaceable part of workbook analysis. */
-export class WorkbookReader extends Context.Service<
-  WorkbookReader,
-  {
-    readonly read: (file: ArrayBuffer) => Effect.Effect<SheetCell[][], WorkbookError>;
-  }
->()("satispay/WorkbookReader") {}
+import { WorkbookError, WorkbookReader, type SheetCell } from "../application/workbook-reader.ts";
+import { Effect, Layer } from "effect";
 
 export const workbookReaderLayer = Layer.succeed(WorkbookReader, {
   read: (file) =>

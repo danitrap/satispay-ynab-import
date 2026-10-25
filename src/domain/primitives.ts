@@ -1,5 +1,10 @@
 import type { Brand } from "effect";
 
+/**
+ * Pure constructors for cents, milliunits, calendar dates and identifiers.
+ * The Brand import is a type; this module does not run Effect.
+ */
+
 export type Cents = number & Brand.Brand<"Cents">;
 export type Milliunits = number & Brand.Brand<"Milliunits">;
 export type CalendarDate = string & Brand.Brand<"CalendarDate">;
@@ -57,13 +62,3 @@ export function calendarDate(value: string): CalendarDate | null {
 }
 export const satispayTransactionId = (value: string): SatispayTransactionId | null =>
   value.trim() ? (value.trim() as SatispayTransactionId) : null;
-
-/** Expected structural worksheet failures, separate from programming defects. */
-export class WorksheetInputError extends Error {
-  readonly _tag = "WorksheetInputError";
-  readonly reason: "EmptyWorksheet" | "InsufficientColumns" | "MissingColumns" | "MissingIdColumn";
-  constructor(reason: WorksheetInputError["reason"]) {
-    super(reason);
-    this.reason = reason;
-  }
-}

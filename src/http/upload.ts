@@ -1,4 +1,4 @@
-import { observeOperation } from "../telemetry.ts";
+import { observeOperation } from "../application/telemetry.ts";
 import { Data, Effect, Stream } from "effect";
 
 const MAX_FILE_BYTES = 4_000_000;

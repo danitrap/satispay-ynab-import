@@ -1,9 +1,15 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { calendarDate, parseCents, centsToMilliunits, makeCents } from "../src/domain.ts";
+import {
+  calendarDate,
+  parseCents,
+  centsToMilliunits,
+  makeCents,
+} from "../src/domain/primitives.ts";
 import { parseSatispayExport } from "../src/infrastructure/satispay-export-reader.ts";
-import { buildPreparedImport, PreparedImportInputError } from "../src/prepared-import.ts";
-import { previewSatispay } from "../src/preview.ts";
+import { PreparedImportInputError } from "../src/application/prepared-import-input.ts";
+import { buildPreparedImport } from "../src/infrastructure/build-prepared-import.ts";
+import { previewSatispay } from "../src/infrastructure/preview-rows.ts";
 import { Effect } from "effect";
 import { requestLiveLayer } from "../src/main.ts";
 import { importPrepared } from "../src/application/import-prepared.ts";

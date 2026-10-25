@@ -10,8 +10,8 @@ import {
 } from "../src/application/import-prepared.ts";
 import { PreparedImportError } from "../src/application/prepare-import.ts";
 import { YnabGatewayError } from "../src/application/ynab-gateway.ts";
-import { WorkbookError } from "../src/errors.ts";
-import { ImportFailedError } from "../src/import-handler.ts";
+import { WorkbookError } from "../src/application/workbook-reader.ts";
+import { ImportFailedError } from "../src/application/process-import.ts";
 import {
   presentAccounts,
   presentAuthorization,

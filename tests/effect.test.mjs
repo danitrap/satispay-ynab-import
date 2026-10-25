@@ -1,13 +1,13 @@
-import { workbookReaderLayer } from "../src/workbook-reader.ts";
+import { workbookReaderLayer } from "../src/infrastructure/workbook-reader.ts";
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Effect } from "effect";
-import { handleRequestEffect } from "../src/index.ts";
+import { handleRequestEffect } from "../src/http/handle-request.ts";
 import { importPrepared, reportedImportCounts } from "../src/application/import-prepared.ts";
 import { listYnabAccounts } from "../src/application/list-ynab-accounts.ts";
 import { importIdentity, toYnabTransaction } from "../src/application/ynab-transaction.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import { readSheetEffect } from "../src/spreadsheet.ts";
+import { readSheetEffect } from "../src/application/workbook-reader.ts";
 import { emptyPreparedImport, preparedFromCandidates } from "./support/candidate-prepared.mjs";
 
 test("Cloudflare request handler is an Effect and retains unauthorized protection", async () => {

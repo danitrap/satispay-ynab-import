@@ -1,4 +1,4 @@
-import { AuthRateLimit } from "./application/auth-rate-limit.ts";
+import { AuthRateLimit } from "../application/auth-rate-limit.ts";
 import { Effect, Redacted } from "effect";
 
 const encoder = new TextEncoder();

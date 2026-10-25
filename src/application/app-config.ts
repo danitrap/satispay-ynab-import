@@ -1,4 +1,4 @@
-import type { CalendarDate, YnabAccountId, YnabPlanId } from "../domain.ts";
+import type { CalendarDate, YnabAccountId, YnabPlanId } from "../domain/primitives.ts";
 import { Context, Data, Effect, type Redacted } from "effect";
 
 /** Cloudflare bindings are read only at the request adapter. */
