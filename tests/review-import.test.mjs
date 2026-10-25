@@ -3,7 +3,8 @@ import { strict as assert } from "node:assert";
 import { Effect } from "effect";
 import { buildImportPlan } from "../src/import-plan.ts";
 import { handleRequestEffect } from "../src/index.ts";
-import { importPlanEffect, requestLiveLayer } from "../src/ynab-service.ts";
+import { requestLiveLayer } from "../src/main.ts";
+import { importPlanEffect } from "../src/ynab-service.ts";
 import { WorkbookReader } from "../src/workbook-reader.ts";
 
 const headers = [

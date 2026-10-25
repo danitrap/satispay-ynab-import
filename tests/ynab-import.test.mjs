@@ -3,7 +3,8 @@ import { strict as assert } from "node:assert";
 import { buildImportPlan, summarizeImportPlan } from "../src/import-plan.ts";
 import { Effect } from "effect";
 import { importIdEffect, buildYnabTransactionsEffect } from "../src/ynab.ts";
-import { importPlanEffect, findAccountsEffect, requestLiveLayer } from "../src/ynab-service.ts";
+import { requestLiveLayer } from "../src/main.ts";
+import { importPlanEffect, findAccountsEffect } from "../src/ynab-service.ts";
 
 const runImport = (plan, env, mockFetch) =>
   Effect.runPromise(importPlanEffect(plan).pipe(Effect.provide(requestLiveLayer(env, mockFetch))));

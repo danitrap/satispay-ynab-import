@@ -1,0 +1,26 @@
+{
+  "forbidden": [
+    {
+      "name": "domain-does-not-import-other-layers",
+      "comment": "The domain imports nothing from the application, infrastructure or HTTP layers. Legacy root modules under src/*.ts stay exempt until the dependency rule covers the whole tree.",
+      "severity": "error",
+      "from": { "path": "^src/domain/" },
+      "to": { "path": "^src/(application|infrastructure|http)/" }
+    },
+    {
+      "name": "application-does-not-import-infrastructure-or-http",
+      "comment": "The application does not import infrastructure or HTTP. Legacy root modules under src/*.ts stay exempt until the dependency rule covers the whole tree.",
+      "severity": "error",
+      "from": { "path": "^src/application/" },
+      "to": { "path": "^src/(infrastructure|http)/" }
+    }
+  ],
+  "options": {
+    "doNotFollow": { "path": "node_modules" },
+    "parser": "swc",
+    "enhancedResolveOptions": {
+      "extensions": [".ts", ".js", ".mjs", ".json"]
+    },
+    "skipAnalysisNotInRules": true
+  }
+}

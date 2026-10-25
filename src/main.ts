@@ -1,0 +1,31 @@
+import { handleRequestEffect } from "./http/handle-request.ts";
+import { appConfigLayer } from "./infrastructure/app-config.ts";
+import { authRateLimitLayer, type WorkerEnv } from "./infrastructure/auth-rate-limit.ts";
+import { operationLogger } from "./telemetry.ts";
+import { workbookReaderLayer } from "./workbook-reader.ts";
+import { ynabHttpLayer } from "./ynab-service.ts";
+import { Effect, Layer, Logger } from "effect";
+import { FetchHttpClient } from "effect/http";
+
+/** Single request composition root. Never retain Cloudflare bindings in a global runtime. */
+export const requestLiveLayer = (env: WorkerEnv, fetchFn: typeof fetch = fetch) => {
+  const config = appConfigLayer(env);
+  const transport = FetchHttpClient.layer.pipe(
+    Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchFn)),
+  );
+  return Layer.mergeAll(
+    ynabHttpLayer.pipe(Layer.provideMerge(config), Layer.provide(transport)),
+    workbookReaderLayer,
+    authRateLimitLayer(env.AUTH_FAILURE_LIMITER),
+    Logger.layer([operationLogger]),
+  );
+};
+
+export default {
+  fetch(request: Request, env: WorkerEnv): Promise<Response> {
+    return Effect.runPromise(
+      handleRequestEffect(request).pipe(Effect.provide(requestLiveLayer(env))),
+      { signal: request.signal },
+    );
+  },
+};

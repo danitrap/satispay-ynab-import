@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
-import { requestLiveLayer } from "../src/ynab-service.ts";
+import { requestLiveLayer } from "../src/main.ts";
 import { processImportEffect } from "../src/import-handler.ts";
 
 const workbook = readFileSync(new URL("./fixtures/satispay.xlsx", import.meta.url));

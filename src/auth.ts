@@ -1,10 +1,5 @@
-import type { AppEnv } from "./config.ts";
-import { Context, Effect, Layer, Redacted } from "effect";
-
-/** Request bindings. The rate limiter is optional so local tests can omit it. */
-export type WorkerEnv = AppEnv & {
-  readonly AUTH_FAILURE_LIMITER?: RateLimit;
-};
+import { AuthRateLimit } from "./application/auth-rate-limit.ts";
+import { Effect, Redacted } from "effect";
 
 const encoder = new TextEncoder();
 const MAX_CLIENT_KEY_LENGTH = 128;
@@ -65,34 +60,6 @@ function clientKey(request: Request): string {
   }
   return address;
 }
-
-type AuthFailureConsumption = "ok" | "limited";
-
-export class AuthRateLimit extends Context.Service<
-  AuthRateLimit,
-  {
-    readonly consumeFailure: (key: string) => Effect.Effect<AuthFailureConsumption>;
-  }
->()("satispay/AuthRateLimit") {}
-
-/**
- * Counts one failed attempt. A missing binding, or a binding that throws,
- * does not throttle: the caller still returns 401. The key is a client address,
- * never the upload token.
- */
-export const authRateLimitLayer = (limiter: RateLimit | undefined) =>
-  Layer.succeed(AuthRateLimit, {
-    consumeFailure: (key) => {
-      if (!limiter) return Effect.succeed("ok" as const);
-      return Effect.tryPromise({
-        try: () => limiter.limit({ key }),
-        catch: () => "unavailable" as const,
-      }).pipe(
-        Effect.map((outcome): AuthFailureConsumption => (outcome.success ? "ok" : "limited")),
-        Effect.orElseSucceed((): AuthFailureConsumption => "ok"),
-      );
-    },
-  });
 
 export type AuthorizationDecision =
   | { readonly _tag: "Authorized" }

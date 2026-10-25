@@ -4,7 +4,8 @@ import { Cause, Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
 import { readSheetEffect, WorkbookError } from "../src/spreadsheet.ts";
 import { WorkbookReader } from "../src/workbook-reader.ts";
-import { importPlanEffect, requestLiveLayer } from "../src/ynab-service.ts";
+import { requestLiveLayer } from "../src/main.ts";
+import { importPlanEffect } from "../src/ynab-service.ts";
 import { ImportFailedError, YnabImportUncertainError } from "../src/errors.ts";
 
 const headers = ["Data", "Nome", "Descrizione", "Importo", "Tipo", "Stato", "Disponibilità", "ID"];

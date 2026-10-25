@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
-import { requestLiveLayer } from "../src/ynab-service.ts";
+import { requestLiveLayer } from "../src/main.ts";
 import { importIdEffect } from "../src/ynab.ts";
 import { WorkbookReader } from "../src/workbook-reader.ts";
 

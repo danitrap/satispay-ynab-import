@@ -362,14 +362,18 @@ The code separates **pure financial calculations** from **effectful I/O**.
 
 ~~~text
 src/
-├── config.ts          Request-scoped, lazily validated Cloudflare bindings
+├── main.ts            Worker entry and the only composition root
+├── domain/            Domain layer for pure movement rules
+├── application/       Ports for configuration and the auth-failure rate limit
+├── infrastructure/    Cloudflare configuration and rate-limiter Layers
+├── http/              Routes, authorization and bounded uploads
+├── index.ts           Re-exports the Worker entry for existing imports
 ├── domain.ts          Pure constructors for dates, identifiers and exact money units
 ├── domain-schema.ts   Schema validation for branded boundary values
 ├── errors.ts          Tagged application failures and import diagnostics
 ├── failure-message.ts Safe presentation of structured failure reasons
 ├── telemetry.ts       Operation timing and bounded outcome counters
-├── auth.ts            Constant-time upload-token checks and auth-failure limits
-├── index.ts           Worker routes, authorization, bounded uploads
+├── auth.ts            Constant-time upload-token checks
 ├── spreadsheet.ts     XLSX decoding and workbook inspection
 ├── workbook-reader.ts Injectable external XLSX decoder
 ├── csv.ts             CSV inspection
@@ -377,7 +381,7 @@ src/
 ├── preview.ts         Pure whole-export classification and summaries
 ├── import-plan.ts     Pure cutoff-aware import planning
 ├── import-handler.ts  Decode → plan → optionally import
-├── ynab-service.ts    Effect Context.Service and Layer composition
+├── ynab-service.ts    YNAB Context.Service and its HTTP Layer
 ├── ynab-contract.ts   Explicit, infrastructure-free YNAB operation contracts
 └── ynab.ts            Effect HttpClient, Schema validation, YNAB API
 ~~~
@@ -395,7 +399,7 @@ The Worker uses [Effect v4](https://effect.website/) throughout its asynchronous
 
 The domain modules stay independent of Effect. There is no global runtime holding Cloudflare request credentials; the live service Layer is provided per request.
 
-`requestLiveLayer` is the single composition root for each request. It provides one configuration module, the optional auth-failure limiter, and the fetch transport, then builds the YNAB implementation, which closes over those dependencies. The router and import programs consume their declared requirements; `YnabServiceApi` describes public results and failures independently of the implementation. Type-level tests verify that public operations leave no infrastructure requirements for callers.
+`requestLiveLayer` in `src/main.ts` is the single composition root for each request. It provides one configuration module, the optional auth-failure limiter, and the fetch transport, then builds the YNAB implementation, which closes over those dependencies. The router and import programs consume their declared requirements; `YnabServiceApi` describes public results and failures independently of the implementation. Type-level tests verify that public operations leave no infrastructure requirements for callers.
 
 Account discovery, target validation and imports declare separate failure types. Uncertain HTTP writes always carry a status, and an import reuses the target configuration it validated. Workbook analysis maps declared input errors to HTTP 422 while preserving unexpected exceptions as defects. The external XLSX decoder is injectable through `WorkbookReader`, whose Effect operations declare `WorkbookError` failures and preserve unexpected defects from injected implementations. The Promise-based library is adapted inside the live service.
 
@@ -415,6 +419,7 @@ Use `npm ci` to install the exact dependency versions recorded in `package-lock.
 npm ci
 npm test                # Test suite
 npm run check           # TypeScript type check
+npm run check:deps      # Domain and application dependency rule
 npm run check:bundle    # Wrangler dry-run bundle (no deployment)
 npm run dev             # Local Worker
 ~~~

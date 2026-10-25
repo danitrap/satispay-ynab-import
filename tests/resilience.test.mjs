@@ -2,7 +2,8 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Clock, Effect, Fiber, Logger, Metric } from "effect";
 import { TestClock, TestConsole } from "effect/testing";
-import { findAccountsEffect, importPlanEffect, requestLiveLayer } from "../src/ynab-service.ts";
+import { requestLiveLayer } from "../src/main.ts";
+import { findAccountsEffect, importPlanEffect } from "../src/ynab-service.ts";
 import worker, { handleRequestEffect } from "../src/index.ts";
 import {
   operationCount,

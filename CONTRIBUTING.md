@@ -11,6 +11,7 @@ npm ci
 npm run format:check
 npm test
 npm run check
+npm run check:deps
 npm run check:bundle
 ```
 
