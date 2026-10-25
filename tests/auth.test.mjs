@@ -73,6 +73,35 @@ test("returns 429 when failed authentication attempts are exhausted", async () =
   assert.equal(JSON.stringify(keys).includes(token), false);
 });
 
+test("invokes crypto.subtle.timingSafeEqual with crypto.subtle as this", async () => {
+  const calls = [];
+  const descriptor = Object.getOwnPropertyDescriptor(crypto.subtle, "timingSafeEqual");
+  Object.defineProperty(crypto.subtle, "timingSafeEqual", {
+    configurable: true,
+    writable: true,
+    value(left, right) {
+      if (this !== crypto.subtle) throw new TypeError("Illegal invocation");
+      calls.push([left.byteLength, right.byteLength]);
+      if (left.byteLength !== right.byteLength) throw new Error("timingSafeEqual length mismatch");
+      return timingSafeEqual(left, right);
+    },
+  });
+  try {
+    const accepted = await worker.fetch(upload(`Bearer ${token}`), bindings());
+    const wrong = await worker.fetch(upload("Bearer test-secreX"), bindings());
+    assert.equal(accepted.status, 200);
+    assert.equal(wrong.status, 401);
+    assert.equal(calls.length >= 2, true);
+    assert.equal(
+      calls.every(([left, right]) => left === right),
+      true,
+    );
+  } finally {
+    if (descriptor) Object.defineProperty(crypto.subtle, "timingSafeEqual", descriptor);
+    else delete crypto.subtle.timingSafeEqual;
+  }
+});
+
 test("compares different-length tokens with crypto.subtle.timingSafeEqual", async () => {
   const calls = [];
   const descriptor = Object.getOwnPropertyDescriptor(crypto.subtle, "timingSafeEqual");

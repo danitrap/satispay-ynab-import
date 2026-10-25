@@ -30,10 +30,10 @@ type TimingSafeEqual = (
 ) => boolean;
 
 function timingSafeEqualBytes(left: Uint8Array, right: Uint8Array): boolean {
-  // DOM's SubtleCrypto type omits the Workers method. Call it when the runtime has it.
+  // DOM's SubtleCrypto type omits the Workers method. workerd throws on an unbound call.
   const compare = (crypto.subtle as SubtleCrypto & { timingSafeEqual?: TimingSafeEqual })
     .timingSafeEqual;
-  if (typeof compare === "function") return compare(left, right);
+  if (typeof compare === "function") return compare.call(crypto.subtle, left, right);
   return fallbackTimingSafeEqual(left, right);
 }
 
