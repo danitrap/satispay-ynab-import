@@ -20,3 +20,7 @@ Use the five canonical triage labels. See `docs/agents/triage-labels.md`.
 ### Domain docs
 
 Use a single-context glossary and ADR layout. See `docs/agents/domain.md`.
+
+### Pull requests
+
+Pull request descriptions must follow the `pr` skill.
