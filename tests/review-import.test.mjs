@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import { buildPreparedImport } from "../src/prepared-import.ts";
 import { handleRequestEffect } from "../src/index.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import { submitPreparedImportEffect } from "../src/ynab-service.ts";
+import { importPrepared, reportedImportCounts } from "../src/application/import-prepared.ts";
 import { WorkbookReader } from "../src/workbook-reader.ts";
 
 const headers = [
@@ -139,7 +139,7 @@ test("10,000 candidates are submitted in 20 sequential batches with exact aggreg
   let active = 0,
     reads = 0;
   const result = await Effect.runPromise(
-    submitPreparedImportEffect(prepared).pipe(
+    importPrepared(prepared.preparedImport).pipe(
       Effect.provide(
         requestLiveLayer(env, async (_url, init) => {
           if (init.method === "GET") {
@@ -166,7 +166,7 @@ test("10,000 candidates are submitted in 20 sequential batches with exact aggreg
   assert.equal(reads, 1);
   assert.deepEqual(sizes, Array(20).fill(500));
   assert.equal(ids.size, 10_000);
-  assert.deepEqual(result, {
+  assert.deepEqual(reportedImportCounts(result), {
     submitted: 10_000,
     confirmed: 10_000,
     processed: 9900,
@@ -185,7 +185,7 @@ test("more than 10,000 candidates fail before contacting YNAB", async () => {
   );
   let calls = 0;
   const error = await Effect.runPromise(
-    submitPreparedImportEffect(prepared).pipe(
+    importPrepared(prepared.preparedImport).pipe(
       Effect.provide(
         requestLiveLayer(env, async () => {
           calls++;
@@ -195,8 +195,7 @@ test("more than 10,000 candidates fail before contacting YNAB", async () => {
       Effect.flip,
     ),
   );
-  assert.equal(error._tag, "YnabImportRejectedError");
-  assert.equal(error.reason, "BatchTooLarge");
+  assert.equal(error._tag, "ImportCandidateLimitError");
   assert.match(error.message, /10,000/);
   assert.equal(calls, 0);
 });

@@ -1,72 +1,93 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { Effect } from "effect";
-import { YnabError } from "../src/ynab.ts";
+import { importPrepared } from "../src/application/import-prepared.ts";
+import { listYnabAccounts, YnabPlanCatalog } from "../src/application/list-ynab-accounts.ts";
+import { YnabGateway, YnabGatewayError } from "../src/application/ynab-gateway.ts";
+import { appConfigLayer } from "../src/infrastructure/app-config.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import {
-  YnabService,
-  ynabTestLayer,
-  findAccountsEffect,
-  submitPreparedImportEffect,
-} from "../src/ynab-service.ts";
+import { emptyPreparedImport, preparedFromCandidates } from "./support/candidate-prepared.mjs";
 
-const prepared = { counts: { rejected: 0 }, candidates: [] };
-const stub = {
-  findAccounts: Effect.succeed({
-    matches: [
-      {
-        planId: "test",
-        planName: "Budget",
-        accountId: "wallet",
-        accountName: "Satispay",
-        onBudget: true,
-      },
-    ],
-    truncated: false,
-  }),
-  validateAccount: Effect.succeed({
-    id: "wallet",
-    name: "Satispay",
-    on_budget: true,
-    closed: false,
-  }),
-  submitPreparedImport: () =>
-    Effect.succeed({
-      submitted: 1,
-      processed: 0,
-      duplicateImports: 1,
-      ynabReportedTransactionIds: 0,
-    }),
+const openAccount = {
+  id: "wallet",
+  name: "Satispay",
+  onBudget: true,
+  closed: false,
+  deleted: false,
+};
+const candidate = {
+  satispayId: "test",
+  date: "2026-10-18",
+  amountMilliunits: -1000,
+  payee: "Shop",
+  memo: "",
+  type: "Altro",
 };
 
-test("test Layer supplies an isolated YNAB service without any HTTP", () => {
-  const program = Effect.gen(function* () {
-    const service = yield* YnabService;
-    assert.equal(typeof service.submitPreparedImport, "function");
-    const accounts = yield* findAccountsEffect;
-    const outcome = yield* submitPreparedImportEffect(prepared);
-    return { accounts, outcome };
-  });
-  return Effect.runPromise(program.pipe(Effect.provide(ynabTestLayer(stub)))).then((result) => {
-    assert.equal(result.accounts.matches[0].accountName, "Satispay");
-    assert.equal(result.outcome.duplicateImports, 1);
-    assert.equal(result.outcome.processed, 0);
-  });
+test("a fake gateway lists Satispay accounts and imports without HTTP", async () => {
+  const gateway = {
+    listAccounts: () =>
+      Effect.succeed([
+        openAccount,
+        { id: "other", name: "Revolut", onBudget: true, closed: false, deleted: false },
+      ]),
+    readAccount: () => Effect.succeed(openAccount),
+    createImportBatch: () =>
+      Effect.succeed({ transactionIds: [], duplicateImportIds: ["SPS:already"] }),
+  };
+  const plans = { listPlans: () => Effect.succeed([{ id: "test", name: "Budget" }]) };
+  const accounts = await Effect.runPromise(
+    listYnabAccounts.pipe(
+      Effect.provideService(YnabGateway, gateway),
+      Effect.provideService(YnabPlanCatalog, plans),
+      Effect.provide(appConfigLayer({ YNAB_TOKEN: "synthetic" })),
+    ),
+  );
+  assert.equal(accounts.matches.length, 1);
+  assert.equal(accounts.matches[0].accountName, "Satispay");
+  assert.equal(accounts.truncated, false);
+  const outcome = await Effect.runPromise(
+    importPrepared(preparedFromCandidates([candidate])).pipe(
+      Effect.provideService(YnabGateway, gateway),
+      Effect.provide(
+        appConfigLayer({
+          YNAB_TOKEN: "synthetic",
+          YNAB_PLAN_ID: "plan",
+          YNAB_ACCOUNT_ID: "wallet",
+          YNAB_WRITE_ENABLED: "true",
+        }),
+      ),
+    ),
+  );
+  assert.equal(outcome.duplicate, 1);
+  assert.equal(outcome.confirmed - outcome.duplicate, 0);
 });
 
-test("test Layer failures remain typed Effect failures", () => {
-  const layer = ynabTestLayer({
-    ...stub,
-    submitPreparedImport: () => Effect.fail(new YnabError("Simulated YNAB failure")),
-  });
-  return Effect.runPromiseExit(
-    submitPreparedImportEffect(prepared).pipe(Effect.provide(layer)),
-  ).then((exit) => {
-    assert.equal(exit._tag, "Failure");
-  });
+test("a fake gateway failure stays a typed Effect failure", async () => {
+  const exit = await Effect.runPromiseExit(
+    importPrepared(preparedFromCandidates([candidate])).pipe(
+      Effect.provideService(YnabGateway, {
+        listAccounts: () => Effect.die("import does not list accounts"),
+        readAccount: () => Effect.succeed(openAccount),
+        createImportBatch: () =>
+          Effect.fail(
+            new YnabGatewayError({ operation: "createImportBatch", reason: { _tag: "Network" } }),
+          ),
+      }),
+      Effect.provide(
+        appConfigLayer({
+          YNAB_TOKEN: "synthetic",
+          YNAB_PLAN_ID: "plan",
+          YNAB_ACCOUNT_ID: "wallet",
+          YNAB_WRITE_ENABLED: "true",
+        }),
+      ),
+    ),
+  );
+  assert.equal(exit._tag, "Failure");
 });
 
-test("live Layer with fake transport rejects malformed YNAB account before any POST", () => {
+test("live Layer with fake transport rejects malformed YNAB account before any POST", async () => {
   let posts = 0;
   const mockFetch = async (_url, init) => {
     if (init?.method === "POST") posts++;
@@ -83,40 +104,30 @@ test("live Layer with fake transport rejects malformed YNAB account before any P
     YNAB_ACCOUNT_ID: "wallet",
     YNAB_WRITE_ENABLED: "true",
   };
-  const candidate = {
-    satispayId: "test",
-    date: "2026-10-18",
-    amountMilliunits: -1000,
-    payee: "Shop",
-    memo: "",
-    type: "Altro",
-  };
-  const populated = { counts: { rejected: 0 }, candidates: [candidate] };
-  return assert
-    .rejects(
-      Effect.runPromise(
-        submitPreparedImportEffect(populated).pipe(
-          Effect.provide(requestLiveLayer(env, mockFetch)),
-        ),
+  await assert.rejects(
+    Effect.runPromise(
+      importPrepared(preparedFromCandidates([candidate])).pipe(
+        Effect.provide(requestLiveLayer(env, mockFetch)),
       ),
-      /Target must be/,
-    )
-    .then(() => assert.equal(posts, 0));
+    ),
+    /Target must be/,
+  );
+  assert.equal(posts, 0);
 });
 
-test("disabled live Layer prevents all network calls", () => {
+test("disabled live Layer prevents all network calls", async () => {
   let calls = 0;
   const mockFetch = async () => {
     calls++;
     throw new Error("Should not call network");
   };
-  const env = { YNAB_WRITE_ENABLED: "false" };
-  return assert
-    .rejects(
-      Effect.runPromise(
-        submitPreparedImportEffect(prepared).pipe(Effect.provide(requestLiveLayer(env, mockFetch))),
+  await assert.rejects(
+    Effect.runPromise(
+      importPrepared(emptyPreparedImport).pipe(
+        Effect.provide(requestLiveLayer({ YNAB_WRITE_ENABLED: "false" }, mockFetch)),
       ),
-      /disabled/,
-    )
-    .then(() => assert.equal(calls, 0));
+    ),
+    /disabled/,
+  );
+  assert.equal(calls, 0);
 });

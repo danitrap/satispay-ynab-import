@@ -111,6 +111,21 @@ export type ImportFailure =
   | ImportBatchError
   | ImportIdentityError;
 
+/** Counts the current import response still reports from one import outcome. */
+export const reportedImportCounts = (outcome: ImportOutcome) => {
+  const processed = outcome.confirmed - outcome.duplicate;
+  return {
+    submitted: outcome.confirmed + outcome.uncertain + outcome.failed,
+    processed,
+    duplicateImports: outcome.duplicate,
+    ynabReportedTransactionIds: outcome.ynabReportedTransactionIds,
+    confirmed: outcome.confirmed,
+    uncertain: outcome.uncertain,
+    failed: outcome.failed,
+    notAttempted: outcome.unattempted,
+  };
+};
+
 const emptyOutcome = (unattempted: number): ImportOutcome => ({
   confirmed: 0,
   duplicate: 0,

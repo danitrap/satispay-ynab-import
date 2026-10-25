@@ -13,6 +13,20 @@
       "severity": "error",
       "from": { "path": "^src/application/" },
       "to": { "path": "^src/(infrastructure|http)/" }
+    },
+    {
+      "name": "shared-errors-do-not-depend-on-application",
+      "comment": "The shared error module does not depend on application types.",
+      "severity": "error",
+      "from": { "path": "^src/errors\\.ts$" },
+      "to": { "path": "^src/application/" }
+    },
+    {
+      "name": "no-cycle-between-errors-and-application",
+      "comment": "Errors and the application layer do not form a cycle.",
+      "severity": "error",
+      "from": { "path": "^src/(errors\\.ts|application/)" },
+      "to": { "path": "^src/(errors\\.ts|application/)", "circular": true }
     }
   ],
   "options": {

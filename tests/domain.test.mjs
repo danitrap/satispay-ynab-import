@@ -6,7 +6,8 @@ import { buildPreparedImport, PreparedImportInputError } from "../src/prepared-i
 import { previewSatispay } from "../src/preview.ts";
 import { Effect } from "effect";
 import { requestLiveLayer } from "../src/main.ts";
-import { submitPreparedImportEffect } from "../src/ynab-service.ts";
+import { importPrepared } from "../src/application/import-prepared.ts";
+import { emptyPreparedImport } from "./support/candidate-prepared.mjs";
 
 const headers = ["Data", "Nome", "Descrizione", "Importo", "Tipo", "Stato", "Disponibilità", "ID"];
 const row = (id, amount) => ["2026-10-18", "Shop", "", amount, "Altro", "✅ Approvato", amount, id];
@@ -73,7 +74,7 @@ test("account validation retains the specific rejection reason without leaking t
       data: { account: { id: "wallet", name: "Satispay", on_budget: true, closed: true } },
     });
   const error = await Effect.runPromise(
-    submitPreparedImportEffect({ counts: { rejected: 0 }, candidates: [] }).pipe(
+    importPrepared(emptyPreparedImport).pipe(
       Effect.provide(
         requestLiveLayer(
           {
@@ -88,7 +89,7 @@ test("account validation retains the specific rejection reason without leaking t
       Effect.flip,
     ),
   );
-  assert.equal(error._tag, "YnabAccountError");
+  assert.equal(error._tag, "ImportTargetAccountError");
   assert.equal(error.reason, "Closed");
   assert.equal(JSON.stringify(error).includes("wallet"), false);
 });

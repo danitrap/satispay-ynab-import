@@ -1,17 +1,21 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
+import { importPrepared, reportedImportCounts } from "../src/application/import-prepared.ts";
+import { listYnabAccounts } from "../src/application/list-ynab-accounts.ts";
+import { importIdentity, toYnabTransaction } from "../src/application/ynab-transaction.ts";
 import { buildPreparedImport } from "../src/prepared-import.ts";
 import { Effect } from "effect";
-import { importIdEffect, buildYnabTransactionsEffect } from "../src/ynab.ts";
 import { requestLiveLayer } from "../src/main.ts";
-import { submitPreparedImportEffect, findAccountsEffect } from "../src/ynab-service.ts";
 
 const runImport = (prepared, env, mockFetch) =>
   Effect.runPromise(
-    submitPreparedImportEffect(prepared).pipe(Effect.provide(requestLiveLayer(env, mockFetch))),
+    importPrepared(prepared.preparedImport).pipe(
+      Effect.provide(requestLiveLayer(env, mockFetch)),
+      Effect.map(reportedImportCounts),
+    ),
   );
 const runAccountDiscovery = (env, mockFetch) =>
-  Effect.runPromise(findAccountsEffect.pipe(Effect.provide(requestLiveLayer(env, mockFetch))));
+  Effect.runPromise(listYnabAccounts.pipe(Effect.provide(requestLiveLayer(env, mockFetch))));
 
 const headers = [
   "Data",
@@ -128,22 +132,23 @@ test("any Disponibilità inflow imports as ordinary inflow including bank, P2P a
 });
 
 test("import IDs are deterministic, privacy preserving and at most 36 chars", async () => {
-  const a = await Effect.runPromise(importIdEffect("external-private-id-123"));
+  const a = await Effect.runPromise(importIdentity("external-private-id-123"));
   assert.equal(a.length, 36);
-  assert.equal(a, await Effect.runPromise(importIdEffect("external-private-id-123")));
-  assert.notEqual(a, await Effect.runPromise(importIdEffect("external-private-id-124")));
+  assert.equal(a, await Effect.runPromise(importIdentity("external-private-id-123")));
+  assert.notEqual(a, await Effect.runPromise(importIdentity("external-private-id-124")));
   assert.equal(a.includes("external"), false);
 });
 test("YNAB payload uses imported cleared unapproved transactions", async () => {
   const prepared = buildPreparedImport([headers, row("a", -12.34)], "2026-10-01");
-  const payload = await Effect.runPromise(
-    buildYnabTransactionsEffect(prepared.candidates, "account-uuid"),
+  const candidate = prepared.preparedImport.movements.find(
+    (movement) => movement._tag === "ImportCandidate",
   );
-  assert.equal(payload[0].amount, -12340);
-  assert.equal(payload[0].approved, false);
-  assert.equal(payload[0].cleared, "cleared");
-  assert.equal(payload[0].account_id, "account-uuid");
-  assert.equal(payload[0].import_id.length, 36);
+  const payload = await Effect.runPromise(toYnabTransaction(candidate, "account-uuid"));
+  assert.equal(payload.amountMilliunits, -12340);
+  assert.equal(payload.approved, false);
+  assert.equal(payload.cleared, "cleared");
+  assert.equal(payload.accountId, "account-uuid");
+  assert.equal(payload.importId.length, 36);
 });
 test("writes disabled means zero YNAB requests", async () => {
   const prepared = buildPreparedImport([headers, row("a", -2)], "2026-10-01");
