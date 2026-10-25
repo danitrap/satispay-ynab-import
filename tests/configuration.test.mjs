@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import worker from "../src/index.ts";
 import { Effect } from "effect";
 import { handleRequestEffect } from "../src/index.ts";
@@ -17,7 +18,7 @@ test("account discovery reports missing configuration without exposing bindings"
   assert.deepEqual(await response.json(), { ok: false, error: "Missing YNAB_TOKEN secret" });
 });
 
-test("health and CSV inspection ignore unrelated invalid YNAB configuration", async () => {
+test("health and xlsx inspection ignore unrelated invalid YNAB configuration", async () => {
   const env = {
     UPLOAD_TOKEN: "upload-secret",
     YNAB_TOKEN: " ",
@@ -30,12 +31,15 @@ test("health and CSV inspection ignore unrelated invalid YNAB configuration", as
     new Request("https://local.invalid/inspect", {
       method: "POST",
       headers: { Authorization: "Bearer upload-secret" },
-      body: "Data;Importo\n2026-10-18;-5\n",
+      body: readFileSync(new URL("./fixtures/satispay.xlsx", import.meta.url)),
     }),
     env,
   );
   assert.equal(inspection.status, 200);
-  assert.equal((await inspection.json()).rowCount, 1);
+  const body = await inspection.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.format, "xlsx");
+  assert.equal(body.imported, 0);
 });
 
 test("invalid secrets never appear in typed configuration failures or HTTP responses", async () => {

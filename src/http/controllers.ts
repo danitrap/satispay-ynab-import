@@ -1,12 +1,10 @@
 import { listYnabAccounts } from "../application/list-ynab-accounts.ts";
-import { decodeCsv, parseCsv } from "../csv.ts";
 import { processImportEffect } from "../import-handler.ts";
 import { inspectXlsxEffect, previewXlsxEffect } from "../spreadsheet.ts";
 import {
   presentAccounts,
   presentConfirmRequired,
   presentImportCompleted,
-  presentInspectCsv,
   presentInspectXlsx,
   presentPreparedImport,
   presentPreview,
@@ -14,7 +12,7 @@ import {
   type PresentedFailure,
   type PresentedRoute,
 } from "./presenters.ts";
-import { fileBuffer, readUpload, sniffUpload, uploadError, type UploadBody } from "./upload.ts";
+import { fileBuffer, readUpload, sniffUpload, uploadError } from "./upload.ts";
 import { Effect } from "effect";
 
 /**
@@ -43,29 +41,19 @@ const readXlsxUpload = (request: Request) =>
     }),
   );
 
-const inspectUpload = (upload: UploadBody) =>
-  Effect.gen(function* () {
-    const sniffed = sniffUpload(upload);
-    if (sniffed._tag === "LegacyXls") return yield* uploadError("LegacyXls");
-    if (sniffed._tag === "NamedXlsx") return yield* uploadError("InvalidXlsx");
-    if (sniffed._tag === "Xlsx") {
-      const summary = yield* inspectXlsxEffect(fileBuffer(upload));
-      return presentInspectXlsx(summary, upload.fileName);
-    }
-    const parsed = yield* Effect.try({
-      try: () => parseCsv(decodeCsv(upload.bytes)),
-      catch: (error) => uploadError("CsvParse", error instanceof Error ? error.message : undefined),
-    });
-    return presentInspectCsv(parsed, upload.fileName);
-  });
-
 export const accountsController = () => respond(listYnabAccounts, "accounts", presentAccounts);
 
 export const inspectController = (request: Request) =>
   respond(
-    readUpload(request).pipe(Effect.flatMap(inspectUpload)),
+    readXlsxUpload(request).pipe(
+      Effect.flatMap((upload) =>
+        inspectXlsxEffect(fileBuffer(upload)).pipe(
+          Effect.map((summary) => ({ summary, fileName: upload.fileName })),
+        ),
+      ),
+    ),
     "inspect",
-    (response) => response,
+    ({ summary, fileName }) => presentInspectXlsx(summary, fileName),
   );
 
 export const previewController = (request: Request) =>

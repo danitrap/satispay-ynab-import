@@ -350,7 +350,7 @@ test("request composition emits structured console logs without upload contents 
           body: "name,amount\nprivate-payee,12.34\n",
         }),
       ).pipe(Effect.provide(requestLiveLayer(env)));
-      assert.equal(response.status, 200);
+      assert.equal(response.status, 415);
       return yield* TestConsole.logLines;
     }).pipe(Effect.provide(TestConsole.layer)),
   );

@@ -245,12 +245,12 @@ A failed check returns HTTP **401** `{ "ok": false, "error": "Unauthorized" }`. 
 | --- | --- | --- | --- |
 | GET | `/health` | Health and supported capabilities | No |
 | GET | `/ynab/accounts` | Discover accessible Satispay-named YNAB accounts. Inspects at most 20 plans; `truncated` is true when later plans were not searched | No |
-| POST | `/inspect` | Inspect workbook or CSV columns and aggregate statistics | No |
+| POST | `/inspect` | Inspect workbook columns and aggregate statistics | No |
 | POST | `/preview` | Analyze all wallet movements; ignore the import cutoff | No |
 | POST | `/prepare` | Build a cutoff-aware prepared import | No |
 | POST | `/import` | Submit valid movements to YNAB | **Yes** |
 
-`/inspect` accepts `.xlsx` and CSV. The other upload endpoints accept `.xlsx` only. Upload a raw file body (recommended) or a multipart file in the field `file`.
+`/inspect`, `/preview`, `/prepare` and `/import` accept `.xlsx` only. `GET /health` reports `formats` as `["xlsx"]`. A CSV upload receives HTTP **415** `{ "ok": false, "error": "Preview/import supports XLSX only" }`. Upload a raw file body (recommended) or a multipart file in the field `file`.
 
 **Limits:** 4 MB per file, 4.5 MB per request, and at most **10,000 import candidates per import**, sent in sequential batches of **500**. Historical and excluded rows do not count toward the candidate limit, but still count toward the file size. Old binary `.xls` files are not supported.
 
@@ -267,7 +267,7 @@ Authenticated configuration failures return HTTP **409**, disabled writes return
 | Endpoint | `mode` | Meaning |
 | --- | --- | --- |
 | `GET /health` | `ready` | The Worker is up |
-| `POST /inspect` | `inspect-only` | CSV inspection. An xlsx inspection omits `mode` |
+| `POST /inspect` | omitted | Workbook inspection. Nothing is sent to YNAB |
 | `POST /preview` | `preview-only` | Movement classification for the whole export. Nothing is sent to YNAB |
 | `POST /prepare` | `prepare-only` | Prepared import for the import cutoff. Nothing is sent to YNAB |
 | `POST /import` | `import-completed` | YNAB accepted every submitted batch |
@@ -390,7 +390,6 @@ src/
 ├── auth.ts            Constant-time upload-token checks
 ├── spreadsheet.ts     XLSX decoding and workbook inspection
 ├── workbook-reader.ts Injectable external XLSX decoder
-├── csv.ts             CSV inspection
 ├── preview.ts         Dry-run summary of the shared classification, without an import cutoff
 ├── prepared-import.ts Builds a prepared import for /prepare and /import
 └── import-handler.ts  Prepare an import, then submit it when the route is /import

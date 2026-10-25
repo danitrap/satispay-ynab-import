@@ -18,7 +18,6 @@ import {
   presentConfirmRequired,
   presentHealth,
   presentImportCompleted,
-  presentInspectCsv,
   presentInspectXlsx,
   presentPreparedImport,
   presentPreview,
@@ -67,7 +66,7 @@ test("health presenter reports the ready mode and supported uploads", async () =
     ok: true,
     service: "satispay-ynab-import",
     mode: "ready",
-    formats: ["xlsx", "csv"],
+    formats: ["xlsx"],
     upload: ["raw", "multipart"],
     routes: ["/inspect", "/preview", "/prepare", "/import", "/ynab/accounts"],
   });
@@ -114,7 +113,7 @@ test("accounts presenter returns the listing and maps discovery failures", async
   assert.deepEqual(await gateway.json(), { ok: false, error: "YNAB network error." });
 });
 
-test("inspect presenter shapes workbook and CSV inspection and maps upload failures", async () => {
+test("inspect presenter shapes workbook inspection and maps upload failures", async () => {
   const workbook = presentInspectXlsx(
     { columns: ["Data", "Importo"], rowCount: 1, sheet: 1, analysis: { types: null } },
     "export.xlsx",
@@ -128,23 +127,6 @@ test("inspect presenter shapes workbook and CSV inspection and maps upload failu
   assert.equal(workbookBody.imported, 0);
   assert.equal(workbookBody.message, "Excel received and parsed. Nothing sent to YNAB.");
   assert.equal("mode" in workbookBody, false);
-
-  const csv = presentInspectCsv(
-    { delimiter: "\t", headers: ["Data", "Importo"], rows: [["2026-10-18", "-1,00"]] },
-    "export.csv",
-  );
-  assert.equal(csv.status, 200);
-  assert.deepEqual(await csv.json(), {
-    ok: true,
-    mode: "inspect-only",
-    fileName: "export.csv",
-    delimiter: "TAB",
-    columns: ["Data", "Importo"],
-    format: "csv",
-    rowCount: 1,
-    imported: 0,
-    message: "CSV received and parsed. Nothing sent to YNAB.",
-  });
 
   const unreadable = presentRouteFailure(
     new WorkbookError("Cannot parse XLSX workbook. Check the exported Excel file."),
@@ -169,7 +151,6 @@ test("inspect presenter shapes workbook and CSV inspection and maps upload failu
     ["LegacyXls", 415],
     ["XlsxOnly", 415],
     ["InvalidXlsx", 422],
-    ["CsvParse", 422],
   ];
   for (const [reason, status] of statuses) {
     const response = presentRouteFailure(uploadError(reason), "inspect");

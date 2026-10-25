@@ -1,10 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import worker from "../src/index.ts";
 
 const token = "test-secret";
-const csv = "Data;Descrizione;Importo\n2026-10-18;Caffe;-3,50\n";
+const workbook = readFileSync(new URL("./fixtures/satispay.xlsx", import.meta.url));
 
 function upload(authorization, address) {
   const headers = { "Content-Type": "application/octet-stream" };
@@ -13,7 +14,7 @@ function upload(authorization, address) {
   return new Request("https://local.invalid/inspect", {
     method: "POST",
     headers,
-    body: csv,
+    body: workbook,
   });
 }
 
@@ -29,7 +30,7 @@ test("accepts the configured upload token", async () => {
   const body = await response.json();
   assert.equal(response.status, 200);
   assert.equal(body.ok, true);
-  assert.equal(body.format, "csv");
+  assert.equal(body.format, "xlsx");
   assert.equal(body.imported, 0);
 });
 
