@@ -140,7 +140,7 @@ test("prepare applies the cutoff and keeps historical purchases out of the impor
   const response = await run("prepare");
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.mode, "import-preview");
+  assert.equal(body.mode, "prepare-only");
   assert.equal(body.fromDate, CUTOFF);
   assert.equal(body.exported, 14);
   assert.equal(body.olderThanStart, 3);
