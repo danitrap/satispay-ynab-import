@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "format": "prettier --write src tests package.json tsconfig.json .prettierrc.json",
-    "format:check": "prettier --check src tests package.json tsconfig.json .prettierrc.json",
+    "format": "prettier --write src tests scripts package.json tsconfig.json .prettierrc.json",
+    "format:check": "prettier --check src tests scripts package.json tsconfig.json .prettierrc.json",
+    "fixture:satispay": "node scripts/generate-satispay-fixture.mjs",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "check": "tsc --noEmit",
     "check:bundle": "wrangler deploy --dry-run --outdir /tmp/satispay-effect-v4-dry-run"
