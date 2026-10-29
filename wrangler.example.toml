@@ -5,7 +5,7 @@ compatibility_date = "2026-10-01"
 workers_dev = true
 
 [observability]
-enabled = true
+enabled = false
 head_sampling_rate = 1
 
 # Safe defaults. Configure UPLOAD_TOKEN, YNAB_TOKEN, YNAB_PLAN_ID,
