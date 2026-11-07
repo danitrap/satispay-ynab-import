@@ -1,0 +1,119 @@
+name: Notify OpenBot Reviewer
+
+on:
+  workflow_run:
+    workflows: [Tests]
+    types: [requested, completed]
+  check_run:
+    types: [completed]
+  pull_request_review:
+    types: [submitted, dismissed]
+  workflow_dispatch:
+
+permissions:
+  pull-requests: read
+
+jobs:
+  notify:
+    if: github.repository == 'danitrap/satispay-ynab-import'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      # No checkout: this job never executes code or downloads artifacts from a PR.
+      - name: Send relevant Dependabot event
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENBOT_WEBHOOK_SECRET: ${{ secrets.OPENBOT_REVIEWER_WEBHOOK_SECRET }}
+        shell: python
+        run: |
+          import hashlib
+          import hmac
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          REPO = 'danitrap/satispay-ynab-import'
+          URL = 'https://signal.openbot.run/v1/webhooks/0fa0eaa1-c120-4c65-9afd-ad96f4e5b88d'
+          with open(os.environ['GITHUB_EVENT_PATH']) as source:
+              event = json.load(source)
+          kind = os.environ['GITHUB_EVENT_NAME']
+          run = event.get('workflow_run', {})
+          check = event.get('check_run', {})
+          sha = run.get('head_sha') or check.get('head_sha')
+          review_number = event.get('pull_request', {}).get('number')
+          if kind == 'workflow_run' and run.get('event') != 'pull_request':
+              raise SystemExit(0)
+
+          def api(path):
+              request = urllib.request.Request(
+                  'https://api.github.com/repos/' + REPO + path,
+                  headers={
+                      'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                      'Accept': 'application/vnd.github+json',
+                      'X-GitHub-Api-Version': '2022-11-28',
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as error:
+                  raise SystemExit('GitHub lookup failed: HTTP ' + str(error.code)) from None
+
+          matches = []
+          page = 1
+          while True:
+              pulls = api('/pulls?state=open&per_page=100&page=' + str(page))
+              for pr in pulls:
+                  if pr['user']['login'] != 'dependabot[bot]' or pr['base']['ref'] != 'main':
+                      continue
+                  if sha and pr['head']['sha'] != sha:
+                      continue
+                  if review_number and pr['number'] != review_number:
+                      continue
+                  matches.append({'number': pr['number'], 'head_sha': pr['head']['sha']})
+              if len(pulls) < 100:
+                  break
+              page += 1
+          if not matches:
+              print('No relevant open Dependabot PRs.')
+              raise SystemExit(0)
+          secret = os.environ.get('OPENBOT_WEBHOOK_SECRET', '')
+          if not secret:
+              raise SystemExit('Missing OPENBOT_REVIEWER_WEBHOOK_SECRET repository Actions secret.')
+          body = json.dumps({
+              'type': 'github.dependabot',
+              'data': {
+                  'repository': {'full_name': REPO},
+                  'event': kind,
+                  'action': event.get('action'),
+                  'pull_requests': matches,
+              },
+          }, separators=(',', ':')).encode()
+          delivery = 'github-' + os.environ['GITHUB_RUN_ID']
+          for attempt in range(3):
+              timestamp = str(int(time.time()))
+              signature = hmac.new(
+                  secret.encode(), timestamp.encode() + b'.' + delivery.encode() + b'.' + body,
+                  hashlib.sha256,
+              ).hexdigest()
+              request = urllib.request.Request(URL, data=body, headers={
+                  'Content-Type': 'application/json',
+                  'X-OpenBot-Timestamp': timestamp,
+                  'X-OpenBot-Delivery-Id': delivery,
+                  'X-OpenBot-Signature': 'sha256=' + signature,
+              }, method='POST')
+              try:
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      if response.status not in (200, 202):
+                          raise SystemExit('Unexpected OpenBot response: ' + str(response.status))
+                  print('OpenBot accepted the event.')
+                  break
+              except urllib.error.HTTPError as error:
+                  if error.code not in (429, 503) or attempt == 2:
+                      raise SystemExit('OpenBot delivery failed: HTTP ' + str(error.code)) from None
+              except urllib.error.URLError:
+                  if attempt == 2:
+                      raise SystemExit('OpenBot delivery failed: network error.') from None
+              time.sleep(2 ** attempt)
