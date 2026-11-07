@@ -76,7 +76,7 @@ jobs:
               if len(pulls) < 100:
                   break
               page += 1
-          if not matches:
+          if not matches and kind != 'workflow_dispatch':
               print('No relevant open Dependabot PRs.')
               raise SystemExit(0)
           secret = os.environ.get('OPENBOT_WEBHOOK_SECRET', '')
