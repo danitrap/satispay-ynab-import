@@ -1,0 +1,72 @@
+name: Dependabot auto-merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  auto-merge:
+    if: >-
+      github.repository == 'danitrap/satispay-ynab-import' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.user.id == 49699333 &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # No checkout or execution of pull request code in this privileged workflow.
+      - name: Fetch and verify Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check every dependency update
+        id: eligibility
+        env:
+          UPDATES: ${{ steps.metadata.outputs.updated-dependencies-json }}
+        shell: python
+        run: |
+          import json
+          import os
+          import re
+
+          version = re.compile(r'^v?(\d+)\.(\d+)\.(\d+)$')
+          try:
+              updates = json.loads(os.environ['UPDATES'])
+              if not isinstance(updates, list) or not updates:
+                  raise ValueError('No verifiable dependency updates')
+              for update in updates:
+                  old = version.fullmatch(update.get('prevVersion', ''))
+                  new = version.fullmatch(update.get('newVersion', ''))
+                  if not old or not new:
+                      raise ValueError('Versions must be complete stable semver')
+                  before, after = tuple(map(int, old.groups())), tuple(map(int, new.groups()))
+                  if before[0] == 0 or before[0] != after[0] or after <= before:
+                      raise ValueError('Only stable non-major upgrades are eligible')
+                  kind = 'version-update:semver-minor' if before[1] != after[1] else 'version-update:semver-patch'
+                  if update.get('updateType') != kind:
+                      raise ValueError('Metadata does not match version change')
+          except (ValueError, TypeError, AttributeError, json.JSONDecodeError) as error:
+              print(f'Manual review required: {error}')
+              raise SystemExit(0)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('eligible=true\n')
+
+      - name: Enable auto-merge after required checks
+        if: steps.eligibility.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: gh pr merge "$PR_NUMBER" --auto --squash --match-head-commit "$HEAD_SHA"
