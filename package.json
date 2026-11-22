@@ -24,6 +24,6 @@
   },
   "dependencies": {
     "effect": "^4.1.4",
-    "read-excel-file": "^9.3.15"
+    "read-excel-file": "^9.3.20"
   }
 }
